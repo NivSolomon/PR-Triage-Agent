@@ -39,6 +39,8 @@ A dashboard can list; it cannot explain, and it cannot draft a comment that a hu
 
 | 3 | GitHub write methods; SQLite store; approval service | **No approval, no action** is enforced in one place (`ApprovalService`), not in the prompt. The model can only *propose*, which writes a pending row and never calls GitHub. Approving atomically moves `pending -> executing` (`UPDATE ... WHERE status='pending' AND expires_at > now`), so double taps or two approvers cannot post twice. The text posted is read from the stored row, so it is exactly what the approver saw. Approval rights are a fixed allowlist, separate from "who may chat". Proposals expire after 24h and at most 20 can wait at once (flood protection). |
 
+| 4 | Deterministic triage engine (`src/triage`) | **Reasoning is computed, then explained.** Each PR is assessed from named signals (CI, review state, conflicts, age, size) with a weight and the fact it rests on. The model's job later is to explain this output, not to invent a ranking, so the same input gives the same order and the logic is unit-tested. Blocked PRs (red CI, changes requested, conflicts) rank *below* reviewable ones: reviewing them now is wasted effort. Confidence drops when inputs are missing (CI fetch failed = low, CI running or no checks = medium) and the gaps are listed in `unknowns`. The engine never says "flaky": we have no run history, so that would be a guess. One PR failing to load is reported, never silently dropped. |
+
 ### Failure halfway through an approved action (design, step 3)
 
 Each posted comment carries a hidden marker `<!-- pr-triage-agent:<id> -->`.
