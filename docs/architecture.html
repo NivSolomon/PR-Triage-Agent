@@ -1,0 +1,219 @@
+﻿<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>PR Triage Agent - Architecture</title>
+<style>
+  @page { size: A4 landscape; margin: 7mm; }
+  body { font: 10px/1.3 "Segoe UI", Arial, sans-serif; color: #0f172a; margin: 0; }
+  h1 { font-size: 18px; margin: 0 0 2px; }
+  .sub { color: #475569; margin-bottom: 6px; }
+  svg { width: 100%; height: 134mm; display: block; }
+  .cols { display: flex; gap: 18px; margin-top: 6px; }
+  .cols > div { flex: 1; }
+  h2 { font-size: 12px; margin: 0 0 3px; }
+  ol, ul { margin: 0; padding-left: 16px; }
+  li { margin-bottom: 2px; }
+  code { font: 10px Consolas, monospace; background: #f1f5f9; padding: 0 2px; }
+  text { font-family: "Segoe UI", Arial, sans-serif; }
+</style>
+</head>
+<body>
+<h1>PR Triage Agent - architecture</h1>
+<div class="sub">Helps a small team decide which pull requests to review first. Answers from live GitHub data; posts a comment only after a human approves that exact text.</div>
+
+<svg viewBox="0 0 1100 600" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#334155"/></marker>
+    <marker id="g" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#15803d"/></marker>
+    <marker id="r" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#b91c1c"/></marker>
+  </defs>
+
+  <!-- Channels -->
+  <text x="20" y="22" font-size="12" font-weight="700" fill="#475569">CHANNELS (who may do what)</text>
+  <rect x="20" y="32" width="190" height="86" rx="8" fill="#eff6ff" stroke="#2563eb"/>
+  <text x="32" y="52" font-size="12" font-weight="700">Telegram bot</text>
+  <text x="32" y="68" font-size="10">private chats, allow-list of user ids</text>
+  <text x="32" y="82" font-size="10">/queue /digest /budget /pending</text>
+  <text x="32" y="96" font-size="10" fill="#15803d" font-weight="600">Approve / Reject buttons</text>
+  <text x="32" y="110" font-size="10" fill="#15803d">(approver ids only)</text>
+
+  <rect x="20" y="132" width="190" height="86" rx="8" fill="#eff6ff" stroke="#2563eb"/>
+  <text x="32" y="152" font-size="12" font-weight="700">Web GUI</text>
+  <text x="32" y="168" font-size="10">chat, ranked queue, audit list</text>
+  <text x="32" y="182" font-size="10">access key: read + ask</text>
+  <text x="32" y="196" font-size="10" fill="#15803d" font-weight="600">approver key: Approve / Reject</text>
+  <text x="32" y="210" font-size="10">failed keys are throttled</text>
+
+  <rect x="20" y="232" width="190" height="86" rx="8" fill="#eff6ff" stroke="#2563eb"/>
+  <text x="32" y="252" font-size="12" font-weight="700">MCP clients (other agents)</text>
+  <text x="32" y="268" font-size="10">POST /mcp, bearer token per client</text>
+  <text x="32" y="282" font-size="10">reader: read + ask</text>
+  <text x="32" y="296" font-size="10">proposer: also create a request</text>
+  <text x="32" y="310" font-size="10" fill="#b91c1c" font-weight="600">no role can approve or post</text>
+
+  <!-- App container -->
+  <rect x="270" y="28" width="520" height="430" rx="10" fill="#f8fafc" stroke="#64748b" stroke-width="1.5" stroke-dasharray="5 3"/>
+  <text x="282" y="46" font-size="12" font-weight="700" fill="#475569">ONE CONTAINER (Node 22, TypeScript) - single instance</text>
+
+  <rect x="290" y="58" width="480" height="40" rx="6" fill="#fff" stroke="#94a3b8"/>
+  <text x="302" y="75" font-size="11" font-weight="700">Channel handlers</text>
+  <text x="302" y="90" font-size="10">authenticate, validate input, send plain text only (PR text is untrusted)</text>
+
+  <rect x="290" y="110" width="300" height="130" rx="6" fill="#fefce8" stroke="#ca8a04"/>
+  <text x="302" y="128" font-size="11" font-weight="700">Agent (LLM tool loop)</text>
+  <text x="302" y="144" font-size="10">1. budget gate (normal / economy / blocked)</text>
+  <text x="302" y="158" font-size="10">2. model decides which tool to call (max 4 rounds)</text>
+  <text x="302" y="172" font-size="10">3. tool results come back, PR text marked untrusted</text>
+  <text x="302" y="186" font-size="10">4. answer: facts, why, confidence, source links</text>
+  <text x="302" y="200" font-size="10">5. grounding check: every #number must be fetched</text>
+  <text x="302" y="214" font-size="10">6. strip Markdown, log usage and cost</text>
+  <text x="302" y="230" font-size="10" fill="#b91c1c">no approve tool exists; propose_comment needs permission</text>
+
+  <rect x="610" y="110" width="160" height="62" rx="6" fill="#fff" stroke="#94a3b8"/>
+  <text x="620" y="128" font-size="11" font-weight="700">Tools</text>
+  <text x="620" y="143" font-size="10">get_review_queue</text>
+  <text x="620" y="156" font-size="10">get_pull_request</text>
+  <text x="620" y="169" font-size="10">propose_comment</text>
+
+  <rect x="610" y="182" width="160" height="58" rx="6" fill="#fff" stroke="#94a3b8"/>
+  <text x="620" y="200" font-size="11" font-weight="700">Triage engine</text>
+  <text x="620" y="214" font-size="10">deterministic score + state</text>
+  <text x="620" y="228" font-size="10">unknowns lower confidence</text>
+
+  <rect x="290" y="254" width="300" height="86" rx="6" fill="#f0fdf4" stroke="#15803d" stroke-width="1.5"/>
+  <text x="302" y="272" font-size="11" font-weight="700">Approval service - the ONLY writer</text>
+  <text x="302" y="287" font-size="10">propose: stores pending row, never writes to GitHub</text>
+  <text x="302" y="300" font-size="10">approve: isApprover check, atomic pending-&gt;executing</text>
+  <text x="302" y="313" font-size="10">posts the STORED text; marker finds a half-failed post</text>
+  <text x="302" y="326" font-size="10">24h expiry, max 20 pending</text>
+
+  <rect x="610" y="254" width="160" height="40" rx="6" fill="#fff" stroke="#94a3b8"/>
+  <text x="620" y="272" font-size="11" font-weight="700">Scheduler</text>
+  <text x="620" y="286" font-size="10">weekday digest (cron)</text>
+
+  <rect x="610" y="300" width="160" height="40" rx="6" fill="#fff" stroke="#94a3b8"/>
+  <text x="620" y="318" font-size="11" font-weight="700">Budget guard</text>
+  <text x="620" y="332" font-size="10">$50/mo incl. hosting</text>
+
+  <!-- SQLite -->
+  <rect x="290" y="356" width="480" height="86" rx="6" fill="#faf5ff" stroke="#7e22ce"/>
+  <text x="302" y="374" font-size="11" font-weight="700">SQLite on a mounted volume (/data)</text>
+  <text x="302" y="390" font-size="10">pending_actions: every proposal, decision, who decided, result or error (audit trail)</text>
+  <text x="302" y="404" font-size="10">llm_usage: each model call with tokens and cost (budget + monthly spend)</text>
+  <text x="302" y="418" font-size="10">kv: one-time budget alerts</text>
+  <text x="302" y="432" font-size="10">no secrets stored here</text>
+
+  <!-- External -->
+  <text x="840" y="22" font-size="12" font-weight="700" fill="#475569">EXTERNAL SERVICES</text>
+  <rect x="840" y="32" width="240" height="104" rx="8" fill="#fff" stroke="#334155"/>
+  <text x="852" y="52" font-size="12" font-weight="700">GitHub REST API</text>
+  <text x="852" y="68" font-size="10">reads: open PRs, CI check runs, reviews, comments</text>
+  <text x="852" y="82" font-size="10" fill="#15803d" font-weight="600">one write: post a PR comment</text>
+  <text x="852" y="96" font-size="10" fill="#15803d">only from the approval service</text>
+  <text x="852" y="112" font-size="10">fine-grained token, one repository</text>
+  <text x="852" y="126" font-size="10">15 s timeout, errors never hide as "passing"</text>
+
+  <rect x="840" y="150" width="240" height="64" rx="8" fill="#fff" stroke="#334155"/>
+  <text x="852" y="170" font-size="12" font-weight="700">LLM API (OpenAI-compatible)</text>
+  <text x="852" y="186" font-size="10">model + base URL are config</text>
+  <text x="852" y="200" font-size="10">sees only compact tool results</text>
+
+  <rect x="840" y="228" width="240" height="50" rx="8" fill="#fff" stroke="#334155"/>
+  <text x="852" y="248" font-size="12" font-weight="700">Telegram Bot API</text>
+  <text x="852" y="264" font-size="10">long polling (no public webhook)</text>
+
+  <!-- Human approver -->
+  <rect x="840" y="400" width="240" height="92" rx="8" fill="#f0fdf4" stroke="#15803d" stroke-width="2"/>
+  <text x="852" y="420" font-size="12" font-weight="700" fill="#15803d">HUMAN APPROVER</text>
+  <text x="852" y="436" font-size="10">sees the approval card: exact comment text,</text>
+  <text x="852" y="449" font-size="10">PR, link, reason, who asked, expiry</text>
+  <text x="852" y="465" font-size="10">decides in Telegram (button) or on the web</text>
+  <text x="852" y="478" font-size="10">page (approver key). Nothing else can.</text>
+
+  <!-- Arrows: channels to container -->
+  <line x1="210" y1="75" x2="288" y2="75" stroke="#334155" stroke-width="1.5" marker-end="url(#a)"/>
+  <line x1="210" y1="175" x2="270" y2="175" stroke="#334155" stroke-width="1.5"/>
+  <line x1="270" y1="175" x2="270" y2="85" stroke="#334155" stroke-width="1.5"/>
+  <line x1="270" y1="85" x2="288" y2="85" stroke="#334155" stroke-width="1.5" marker-end="url(#a)"/>
+  <line x1="210" y1="275" x2="258" y2="275" stroke="#334155" stroke-width="1.5"/>
+  <line x1="258" y1="275" x2="258" y2="95" stroke="#334155" stroke-width="1.5"/>
+  <line x1="258" y1="95" x2="288" y2="95" stroke="#334155" stroke-width="1.5" marker-end="url(#a)"/>
+
+  <!-- Handlers to agent / approvals -->
+  <line x1="440" y1="98" x2="440" y2="110" stroke="#334155" stroke-width="1.5" marker-end="url(#a)"/>
+  <line x1="590" y1="140" x2="610" y2="140" stroke="#334155" stroke-width="1.5" marker-end="url(#a)"/>
+  <line x1="690" y1="172" x2="690" y2="182" stroke="#334155" stroke-width="1.5" marker-end="url(#a)"/>
+  <!-- propose -> approval service -->
+  <line x1="440" y1="240" x2="440" y2="254" stroke="#15803d" stroke-width="1.5" marker-end="url(#g)"/>
+  <text x="446" y="249" font-size="9" fill="#15803d">propose only</text>
+
+  <!-- To external -->
+  <line x1="770" y1="140" x2="840" y2="90" stroke="#334155" stroke-width="1.5" marker-end="url(#a)"/>
+  <text x="780" y="104" font-size="9" fill="#334155">read</text>
+  <line x1="590" y1="125" x2="598" y2="125" stroke="#334155"/>
+  <path d="M770 118 Q 810 130 840 175" fill="none" stroke="#334155" stroke-width="1.5" marker-end="url(#a)"/>
+  <path d="M590 297 L 600 297 L 600 247 L 590 247" fill="none" stroke="none"/>
+  <line x1="770" y1="270" x2="840" y2="258" stroke="#334155" stroke-width="1.5" marker-end="url(#a)"/>
+  <text x="790" y="256" font-size="9">digest</text>
+
+  <!-- Telegram updates in/out of the handlers -->
+  <line x1="840" y1="236" x2="773" y2="82" stroke="#334155" stroke-width="1.5" marker-start="url(#a)" marker-end="url(#a)"/>
+  <!-- Approver path: the human uses Telegram buttons (or the web page), which reach the approval service through the handlers -->
+  <line x1="960" y1="400" x2="960" y2="280" stroke="#15803d" stroke-width="2" stroke-dasharray="6 3" marker-end="url(#g)"/>
+  <text x="968" y="380" font-size="9" fill="#15803d" font-weight="600">presses Approve / Reject</text>
+
+  <!-- the one write: leaves the approval service through the gap under the third row, goes up the right margin -->
+  <path d="M575 340 L575 347 L1092 347 L1092 100 L1081 100" fill="none" stroke="#15803d" stroke-width="2.5" marker-end="url(#g)"/>
+  <text x="800" y="341" font-size="10" fill="#15803d" font-weight="700">the only write to GitHub, only after approval</text>
+
+  <!-- MCP cannot approve -->
+  <line x1="150" y1="318" x2="150" y2="352" stroke="#b91c1c" stroke-width="2" marker-end="url(#r)"/>
+  <text x="20" y="372" font-size="10" fill="#b91c1c" font-weight="700">MCP and the access key cannot</text>
+  <text x="20" y="385" font-size="10" fill="#b91c1c" font-weight="700">reach the approve action.</text>
+
+  <!-- Secrets -->
+  <rect x="20" y="520" width="1060" height="70" rx="8" fill="#fff7ed" stroke="#ea580c"/>
+  <text x="32" y="538" font-size="12" font-weight="700" fill="#c2410c">WHERE SECRETS ARE KEPT</text>
+  <text x="32" y="553" font-size="10">Platform secrets / environment variables only (<tspan font-family="Consolas, monospace">fly secrets set</tspan>, or a git-ignored <tspan font-family="Consolas, monospace">.env</tspan> locally). Never in git, never in the image, never in SQLite.</tspan></text>
+  <text x="32" y="567" font-size="10">GITHUB_TOKEN, LLM_API_KEY, TELEGRAM_BOT_TOKEN, WEB_ACCESS_KEY, WEB_APPROVER_KEY, MCP_TOKENS. Approver identities: APPROVER_TELEGRAM_IDS and the web approver key.</text>
+  <text x="32" y="581" font-size="10">Keys are compared in constant time, sent as Bearer headers (not URLs); MCP clients are logged by a hash of their token, not the token.</text>
+</svg>
+
+<div class="cols">
+  <div>
+    <h2>Flow of an approved comment</h2>
+    <ol>
+      <li>A user asks in Telegram, on the web or over MCP: "comment on #102 asking for a CI fix".</li>
+      <li>The agent fetches fresh data, then calls <code>propose_comment</code> (only if the caller may propose).</li>
+      <li>The approval service stores a <b>pending</b> row. <b>Nothing is sent to GitHub.</b></li>
+      <li>Approvers get a card with the exact text. They press Approve or Reject.</li>
+      <li>On approve the row moves atomically to <i>executing</i>, then the stored text is posted once.</li>
+      <li>The outcome (executed / failed / uncertain) is saved and told to the approver and the requester.</li>
+    </ol>
+  </div>
+  <div>
+    <h2>Scheduled and background work</h2>
+    <ul>
+      <li>Weekday 08:30 digest from the deterministic queue: no model, no AI cost, failure is reported not silent.</li>
+      <li>Budget alerts fire once per threshold (80% economy, 100% blocked).</li>
+      <li>Pending requests expire after 24 hours.</li>
+    </ul>
+    <h2 style="margin-top:6px">Deployment</h2>
+    <ul>
+      <li>One container, one volume, exactly one instance (polling + SQLite).</li>
+      <li>Health check <code>GET /healthz</code>; config in <code>fly.toml</code>, steps in README.</li>
+    </ul>
+  </div>
+  <div>
+    <h2>Trust boundaries</h2>
+    <ul>
+      <li>PR titles, descriptions and comments are written by third parties: treated as data, never instructions, and kept in a separate <code>untrustedText</code> field.</li>
+      <li>Chat access and approval rights are separate lists.</li>
+      <li>Approval rights are decided in one function (<code>isApprover</code>); MCP identities are never in it.</li>
+      <li>Budget: model usage + hosting stays under $50/month; at the limit the agent stops using the model and says why.</li>
+    </ul>
+  </div>
+</div>
+</body>
+</html>

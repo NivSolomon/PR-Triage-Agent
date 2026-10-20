@@ -55,6 +55,9 @@ A dashboard can list; it cannot explain, and it cannot draft a comment that a hu
 
 | 11 | Evals (`evals/`, `npm run evals`) | 12 evals run the **real agent** (real model, real approval service, real budget guard) over a frozen fixture repo whose right answers are known (see "Evals" below). They found two real defects, fixed in the same step. |
 
+| 12 | Runtime grounding check (`src/agent/grounding.ts`) | Every `#number` in an answer must appear in the data fetched for that request, or the user typed it. Otherwise a visible warning is appended and a `[grounding]` line is logged. It catches invented or mistyped PR numbers only, not wrong claims, and says so. Added because the evals only cover a frozen repo, while this runs on every real answer. |
+| 13 | Deployment and architecture (`Dockerfile`, `fly.toml`, `README.md`, `docs/architecture.pdf`) | One container, one volume, exactly one instance (Telegram long polling and the scheduler must not run twice; SQLite is single-writer). Runs as a non-root user, no build step (`tsx` runs the TypeScript). Image built and started locally: it fails fast on missing secrets and starts the web server. The PDF is generated from `docs/architecture.html`, so it can be regenerated. |
+
 ### Who may trigger the action through MCP? (requirement 5)
 
 **Nobody can execute it. Only a `proposer` token can start the approval flow.**
