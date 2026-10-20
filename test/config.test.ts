@@ -16,8 +16,16 @@ describe("loadConfig", () => {
   });
 
   it("parses the MCP token map", () => {
-    const c = loadConfig({ MCP_TOKENS: '{"a":"reader","b":"approver"}' });
-    expect(c.MCP_TOKENS).toEqual({ a: "reader", b: "approver" });
+    const a = "a".repeat(16);
+    const b = "b".repeat(16);
+    const c = loadConfig({ MCP_TOKENS: JSON.stringify({ [a]: "reader", [b]: "proposer" }) });
+    expect(c.MCP_TOKENS).toEqual({ [a]: "reader", [b]: "proposer" });
+  });
+
+  it("has no MCP role that can approve, and rejects short tokens", () => {
+    const t = "t".repeat(16);
+    expect(() => loadConfig({ MCP_TOKENS: JSON.stringify({ [t]: "approver" }) })).toThrow(/Invalid configuration/);
+    expect(() => loadConfig({ MCP_TOKENS: '{"short":"reader"}' })).toThrow(/Invalid configuration/);
   });
 
   it("rejects an MCP token with an unknown role", () => {

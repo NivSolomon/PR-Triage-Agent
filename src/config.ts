@@ -16,11 +16,15 @@ const jsonMap = z
   .transform((s, ctx) => {
     try {
       const parsed: unknown = JSON.parse(s);
-      return z.record(z.string(), z.enum(["reader", "approver"])).parse(parsed);
+      // Roles: "reader" = read + ask; "proposer" = also create (never execute) comment requests.
+      // There is deliberately no MCP role that can approve: approval is a human act.
+      return z
+        .record(z.string().min(16, "token too short"), z.enum(["reader", "proposer"]))
+        .parse(parsed);
     } catch {
       ctx.addIssue({
         code: "custom",
-        message: 'must be JSON like {"token":"reader"|"approver"}',
+        message: 'must be JSON like {"<token of 16+ chars>":"reader"|"proposer"}',
       });
       return z.NEVER;
     }

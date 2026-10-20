@@ -1,4 +1,3 @@
-import { createHash, timingSafeEqual } from "node:crypto";
 import express from "express";
 import type { NextFunction, Request, Response } from "express";
 import { z } from "zod";
@@ -11,6 +10,7 @@ import type { DecisionResult } from "../channels/shared.js";
 import type { GitHubClient } from "../github/client.js";
 import type { ActionRecord } from "../store/actions.js";
 import { buildQueue } from "../triage/queue.js";
+import { FailureThrottle, bearerToken, sameSecret } from "./throttle.js";
 import { APP_JS, INDEX_HTML } from "./ui.js";
 
 export type WebRole = "reader" | "approver";
@@ -28,20 +28,15 @@ export interface WebDeps {
   onProposed?: (record: ActionRecord) => Promise<void> | void;
   /** A decision taken on the web page: lets the requester be told. */
   onDecided?: (result: DecisionResult) => Promise<void> | void;
+  /** Mount extra routes (the MCP endpoint) before the final error handler. */
+  mount?: (app: express.Express) => void;
 }
-
-const digest = (s: string) => createHash("sha256").update(s).digest();
-/** Constant-time comparison: hashing first makes both sides the same length. */
-const sameKey = (given: string, expected: string): boolean => timingSafeEqual(digest(given), digest(expected));
 
 const chatBody = z.object({
   text: z.string().trim().min(1).max(2000),
   conversationId: z.string().regex(/^[\w-]{8,64}$/),
 });
 const idParam = z.string().regex(/^[\w-]{1,60}$/);
-
-const FAIL_LIMIT = 10;
-const FAIL_WINDOW_MS = 10 * 60_000;
 
 export function createWebApp(deps: WebDeps): express.Express {
   if (deps.accessKey && deps.approverKey && deps.accessKey === deps.approverKey) {
@@ -64,7 +59,7 @@ export function createWebApp(deps: WebDeps): express.Express {
   app.get("/app.js", (_req, res) => void res.type("js").send(APP_JS));
 
   // --- auth for /api ---
-  const failures = new Map<string, { count: number; resetAt: number }>();
+  const throttle = new FailureThrottle();
   const webEnabled = Boolean(deps.accessKey || deps.approverKey);
 
   const authenticate = (req: Request, res: Response, next: NextFunction): void => {
@@ -73,24 +68,19 @@ export function createWebApp(deps: WebDeps): express.Express {
       return;
     }
     const ip = req.ip ?? "unknown";
-    const now = Date.now();
-    const rec = failures.get(ip);
-    if (rec && rec.resetAt > now && rec.count >= FAIL_LIMIT) {
+    if (throttle.blocked(ip)) {
       res.status(429).json({ error: "Too many failed attempts. Try again in a few minutes." });
       return;
     }
 
-    const header = req.header("authorization") ?? "";
-    const key = header.startsWith("Bearer ") ? header.slice(7).trim() : "";
+    const key = bearerToken(req.header("authorization"));
     let role: WebRole | null = null;
     if (key) {
-      if (deps.approverKey && sameKey(key, deps.approverKey)) role = "approver";
-      else if (deps.accessKey && sameKey(key, deps.accessKey)) role = "reader";
+      if (deps.approverKey && sameSecret(key, deps.approverKey)) role = "approver";
+      else if (deps.accessKey && sameSecret(key, deps.accessKey)) role = "reader";
     }
     if (!role) {
-      const current = rec && rec.resetAt > now ? rec : { count: 0, resetAt: now + FAIL_WINDOW_MS };
-      current.count += 1;
-      failures.set(ip, current);
+      throttle.fail(ip);
       res.status(401).json({ error: "Missing or wrong key." });
       return;
     }
@@ -169,6 +159,7 @@ export function createWebApp(deps: WebDeps): express.Express {
   api.post("/actions/:id/reject", requireApprover, decideRoute("reject"));
 
   app.use("/api", api);
+  deps.mount?.(app);
 
   // Last resort: never leak internals or stack traces.
   app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {

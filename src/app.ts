@@ -7,6 +7,7 @@ import { TelegramChannel } from "./channels/telegram.js";
 import { requireConfig } from "./config.js";
 import type { Config } from "./config.js";
 import { GitHubClient } from "./github/client.js";
+import { createMcpRouter } from "./mcp/server.js";
 import { runDigest, startDigestSchedule } from "./scheduler/digest.js";
 import type { SchedulerHandle } from "./scheduler/digest.js";
 import { createWebApp } from "./web/server.js";
@@ -95,6 +96,16 @@ export function createApp(config: Config): App {
     budget,
     // A request made on the web page must reach the Telegram approvers too.
     onProposed: async (record) => void (await telegram.sendApprovalCards(record)),
+    mount: (expressApp) =>
+      expressApp.use(
+        "/mcp",
+        createMcpRouter({
+          tokens: config.MCP_TOKENS,
+          agent,
+          tools: { github, approvals },
+          onProposed: async (record) => void (await telegram.sendApprovalCards(record)),
+        }),
+      ),
     // A decision made on the web page: tell the Telegram user who asked.
     onDecided: async (result) => {
       const requester = result.record?.requestedBy;

@@ -51,6 +51,20 @@ A dashboard can list; it cannot explain, and it cannot draft a comment that a hu
 
 | 9 | Web GUI (`src/web`) | One page served by Express, no build step: chat, the ranked queue, and the approval list with Approve/Reject. **Two keys**: `WEB_ACCESS_KEY` can read, chat and ask for a comment but gets a 403 on approve/reject; `WEB_APPROVER_KEY` can also decide. This gives testers an approval path without needing their Telegram ids, and the approver key is a separate secret from the one used to look around. Keys are compared in constant time, sent as a Bearer header (never in a URL, so they stay out of logs), and 10 wrong keys lock an address out for 10 minutes. The page writes untrusted text with `textContent` only (a test fails if `innerHTML` ever appears), and a CSP blocks inline scripts. A request created on the web is also sent to the Telegram approvers, and a web decision messages the Telegram requester, so the two channels stay in sync. Both go through the same `ApprovalService`, so "posts once" and "text is what was shown" hold on every channel. |
 
+| 10 | MCP endpoint (`src/mcp`) | Stateless Streamable HTTP at `POST /mcp`, bearer-token auth (constant-time compare against every token, wrong-token lockout like the web page). Tools: `get_review_queue`, `get_pull_request`, `ask_triage_agent`, and `propose_comment`. See the answer below. |
+
+### Who may trigger the action through MCP? (requirement 5)
+
+**Nobody can execute it. Only a `proposer` token can start the approval flow.**
+
+| Token role | Can read and ask | Can create a comment *request* | Can approve / post |
+|---|---|---|---|
+| `reader` | yes | no (tool is not even listed; the executor also refuses) | no |
+| `proposer` | yes | yes, recorded as `mcp:proposer:<id>`, shown to the approver | no |
+| any MCP token | | | **no: there is no approve tool** |
+
+Why: an MCP client is another program, possibly driven by another model reading untrusted text. If it could approve its own proposal, "human approval" would be decorative. So approval rights live only in `ApprovalService.isApprover`, which accepts Telegram ids from `APPROVER_TELEGRAM_IDS` and the web approver key, and no MCP identity. The MCP role names say what they do (`reader`, `proposer`); an earlier draft called the second one `approver`, which would have promised something the system must never allow, so it was renamed and the config rejects `approver`. `ask_triage_agent` passes the caller's role into the agent (`canPropose`), so a reader cannot get a proposal by asking the model nicely. Each client gets its own actor id (hash of its token, never the token), which is used for the audit trail and the per-client daily cap.
+
 ### Failure halfway through an approved action (design, step 3)
 
 Each posted comment carries a hidden marker `<!-- pr-triage-agent:<id> -->`.
