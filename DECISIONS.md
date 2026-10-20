@@ -103,7 +103,22 @@ It is still flagged experimental in Node 22 (prints a warning), but it needs no 
 
 ## 5. Where AI helped and where it was wrong
 
-_Updated as the project progresses._
+AI tools (Cursor with Claude) wrote most of the first drafts of code and tests, and I reviewed and ran them. The steps below record where that went wrong or needed correcting, because those are the places that taught me something.
+
+**Where AI helped**
+- Fast first drafts of the typed config, the GitHub client with strict response validation, SQLite migrations, and the test suites (so far 119 unit tests).
+- Suggesting failure cases I would have skipped: the double-tap on Approve, "approved but GitHub did not answer", and a hostile PR description.
+- Building the eval fixture (a frozen repo with known right answers) so that "is the answer correct" is checkable.
+
+**Where it was wrong or misleading, and what I did**
+1. **MCP role named `approver`.** The first draft let an MCP token have the role "approver". That promised something the system must never do: an MCP client is another program, so it must not be able to approve its own proposal. I renamed the role to `proposer`, removed any MCP path to approve, and made the config reject `approver`.
+2. **Formatting rule in the prompt was ignored.** I told the model to answer in plain text; it kept sending Markdown (`**bold**`, `[title](url)`), which Telegram shows as raw symbols. A prompt is a request, not a guarantee, so the fix is code (`toPlainText`) plus a unit test.
+3. **The model silently left a PR out.** The first eval run found that the model chose `limit: 5` itself and never mentioned that more PRs existed, so #106 vanished from the answer. I removed `limit` from the model's tool, made the tool report `moreOpenPrsNotShown`, and told the prompt to say what it left out. This was found only because the eval had a known right answer.
+4. **Invisible page text.** The web page used `color-scheme: light dark` and looked fine in tests, but a real browser screenshot showed the title and labels as white on white. Automated tests cannot see this. I replaced it with explicit colours, and I now check the page by looking at it.
+5. **A cost estimate that was only a guess.** My first token numbers were assumptions. I measured the real cost with the real model (section 6): about 3.5x lower than assumed. I kept the higher figure as the plan because the fixture is small.
+6. **A scripted edit half-applied.** A search-and-replace on `web/server.ts` partly applied and left references to removed variables. I noticed by reading the file, not by trusting the tool's "done", and fixed it by hand; the type-checker and tests confirmed it.
+
+**Not yet verified:** the live Telegram and live GitHub write paths. Their logic is unit-tested with fakes and the web flow was clicked through in a browser against the fixture repo, but a real token and a real bot have not been exercised in this repo yet. This is listed again under question 3.
 
 ## 6. Cost estimate
 
@@ -120,7 +135,9 @@ A request is a short tool loop: the model gets the question plus the tool list (
 
 Prices are for `gpt-4o-mini`; they are config (`LLM_PRICE_*`), not code, so changing the model changes the estimate and the guard together.
 
-**Stress case:** 3x the tokens (long PR threads) and 2x the requests (the daily cap allows 40 per person): 6x the typical $3.70 is about $22 of model use + $7 hosting = **about $29**, still under $50. The scheduled digest adds about 22 runs/month, under $0.10.
+**Stress case:** 3x the tokens (long PR threads) and 2x the requests (the daily cap allows 40 per person): 6x the typical $3.70 is about $22 of model use + $7 hosting = **about $29**, still under $50. The scheduled digest uses no model at all, so it adds $0.
+
+**Measured, not just estimated:** `npx tsx --env-file-if-exists=.env evals/show.ts` runs five typical questions through the real agent and model against the fixture repo. Result with `gpt-4o-mini`: **$0.00047 per request**, which projects to **about $1.03/month** for 2,200 requests. That is roughly 3.5x *below* the table above, so the table is deliberately conservative. The fixture has only 6 short PRs; a repo with 15+ PRs and long review threads sends much more data per request, which is why the plan keeps the higher figure and the stress case. The real number will come from the usage log after the first week (`/budget`).
 
 **What happens near the limit** (`src/budget/service.ts`, tested): the model allowance is `budget - hosting` ($43 by default).
 
@@ -134,4 +151,28 @@ A per-person daily cap (40) stops one user or a looping bot from using the month
 
 ## 7. Understanding questions
 
-_Added at the end._
+**1. The approved action starts and the external API call fails halfway. What happens, and what does the user see?**
+
+The approver's click first moves the action from `pending` to `executing` in one atomic database update, so a second tap or a second approver cannot run it again. Then the comment is sent to GitHub with a hidden marker (`<!-- pr-triage-agent:<id> -->`). What happens next depends on what came back:
+
+- **GitHub answered with a 4xx** (no permission, PR closed, bad number): it definitely did not happen. Status becomes `failed`. The user sees: "Approved, but the comment was NOT posted: <reason>. You can propose it again."
+- **No answer or a 5xx** (timeout, network drop): I cannot tell whether the comment went through, so I do not guess. I search the PR's comments for the marker. Found: the status becomes `executed` and no second comment is ever sent. Not found: `failed`.
+- **The search also fails:** status `uncertain`. The user sees: "Approved, but I could not confirm the result... Please check <PR link> before trying again." I would rather say "I don't know" than risk a duplicate public comment.
+
+Every outcome is stored with the error text, so the audit list on the web page shows what happened. Covered by tests in `test/approvals.test.ts`.
+
+**2. The agent is live for a month. How would I find out it is giving wrong answers before someone relies on them?**
+
+What exists today:
+- A **runtime grounding check** on every answer: each `#number` must appear in the data fetched for that request, otherwise a visible warning is appended for the reader and a `[grounding]` line is logged. A rising count of those log lines means the model is drifting. It only catches wrong PR numbers, not wrong claims.
+- The **evals** (`npm run evals`) re-run against a frozen repo with known answers. I would run them before every deploy and when the model name changes, because a provider updating a model silently is the most likely way answers change without anyone touching the code.
+- The **ranking is deterministic and unit-tested**, so most of what users rely on does not depend on the model at all; the model only explains it.
+- The **usage log** and `/budget` show odd behaviour such as a sudden jump in tokens per request (usually a loop or a changed prompt).
+
+What I would add and have not built: a "this was wrong" button that stores the question, the tools' data and the answer for review; and a weekly check where someone compares five random answers with GitHub.
+
+**3. Which part am I least confident in, and why?**
+
+1. **The live integrations.** The Telegram bot and the real GitHub write path are covered by logic tests with fakes, and the web flow was clicked through in a browser, but a real bot token and a real repo have not been exercised end to end in this repo. This is where a surprise (permissions on the fine-grained token, privacy settings, rate limits) is most likely.
+2. **The scoring weights.** Numbers like "+10 for small, -30 for failing CI" are my judgement. They give sensible orderings on the fixture, but I have not validated them on a real team's PRs. They live in one file with tests (`src/triage/analyze.ts`) so they are easy to tune, but I am not yet sure they match how this team actually prioritises.
+3. **The evals are checks on keywords.** They look for facts and behaviour, not exact wording, and I ran them twice on one model. That is a sanity check, not a measurement of reliability.
