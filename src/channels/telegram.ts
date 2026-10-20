@@ -6,6 +6,7 @@ import type { Agent } from "../agent/agent.js";
 import type { BudgetService } from "../budget/service.js";
 import type { GitHubClient } from "../github/client.js";
 import type { ActionRecord } from "../store/actions.js";
+import { renderDigest } from "../scheduler/digest.js";
 import { buildQueue } from "../triage/queue.js";
 import {
   decide,
@@ -41,6 +42,7 @@ const HELP = [
   "Commands:",
   "/queue - ranked review queue (no AI credit used)",
   "/pending - actions waiting for approval",
+  "/digest - the morning digest, on demand",
   "/budget - AI budget status",
 ].join("\n");
 
@@ -65,6 +67,7 @@ export class TelegramChannel {
     await this.bot.api.setMyCommands([
       { command: "queue", description: "Ranked review queue" },
       { command: "pending", description: "Actions waiting for approval" },
+      { command: "digest", description: "Morning digest on demand" },
       { command: "budget", description: "AI budget status" },
       { command: "help", description: "What I can do" },
     ]);
@@ -147,6 +150,18 @@ export class TelegramChannel {
           await this.reply(ctx, renderQueue(await buildQueue(this.d.github)));
         } catch (err) {
           await ctx.reply(`I couldn't load the queue: ${err instanceof Error ? err.message : "unknown error"}`);
+        }
+      }),
+    );
+
+    // Same text the scheduled job sends, on demand (also how a tester can see it work).
+    bot.command("digest", (ctx) =>
+      this.guarded(ctx, async () => {
+        await ctx.replyWithChatAction("typing");
+        try {
+          await this.reply(ctx, renderDigest(await buildQueue(this.d.github)));
+        } catch (err) {
+          await ctx.reply(`I couldn't build the digest: ${err instanceof Error ? err.message : "unknown error"}`);
         }
       }),
     );

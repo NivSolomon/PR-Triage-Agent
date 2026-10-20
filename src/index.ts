@@ -4,7 +4,7 @@ import { loadConfig } from "./config.js";
 async function main(): Promise<void> {
   const config = loadConfig();
   const app = createApp(config);
-  await app.telegram.start();
+  await app.start();
   console.log(`PR triage agent running for ${config.GITHUB_REPO}`);
 
   let stopping = false;
