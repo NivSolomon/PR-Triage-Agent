@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { GitHubClient, GitHubError, truncate } from "../src/github/client.js";
+﻿import { describe, expect, it } from "vitest";
+import { GitHubClient, GitHubError, isAmbiguousFailure, truncate } from "../src/github/client.js";
 
 type Route = unknown | { status: number; headers?: Record<string, string> };
 
@@ -164,5 +164,48 @@ describe("truncate", () => {
   it("handles null and short strings", () => {
     expect(truncate(null)).toBe("");
     expect(truncate("  hi  ")).toBe("hi");
+  });
+});
+
+describe("writes", () => {
+  it("postComment sends the body as JSON and returns the comment url", async () => {
+    let captured: { method?: string; body?: string } = {};
+    const c = new GitHubClient({
+      token: "t",
+      repo: "acme/app",
+      fetchImpl: (async (_url: string, init: RequestInit) => {
+        captured = { method: init.method, body: String(init.body) };
+        return new Response(JSON.stringify({ id: 5, html_url: "https://x/c5" }), { status: 201 });
+      }) as unknown as typeof fetch,
+    });
+    const res = await c.postComment(7, "hello");
+    expect(res).toEqual({ id: 5, url: "https://x/c5" });
+    expect(captured.method).toBe("POST");
+    expect(JSON.parse(captured.body ?? "{}")).toEqual({ body: "hello" });
+  });
+
+  it("findCommentWithMarker returns the matching comment or null", async () => {
+    const comments = [
+      { id: 1, html_url: "https://x/c1", body: "unrelated" },
+      { id: 2, html_url: "https://x/c2", body: "text <!-- pr-triage-agent:abc -->" },
+    ];
+    const c = client({ "/issues/7/comments": comments });
+    expect(await c.findCommentWithMarker(7, "<!-- pr-triage-agent:abc -->", "2026-10-01T00:00:00Z")).toEqual({
+      id: 2,
+      url: "https://x/c2",
+    });
+    expect(await c.findCommentWithMarker(7, "<!-- pr-triage-agent:zzz -->", "2026-10-01T00:00:00Z")).toBeNull();
+  });
+
+  it("getPrSummary makes a single lightweight lookup", async () => {
+    const s = await client({ "/pulls/7": pr() }).getPrSummary(7);
+    expect(s.title).toBe("Fix login");
+  });
+
+  it("classifies ambiguous failures (no response / 5xx) separately from definite ones (4xx)", () => {
+    expect(isAmbiguousFailure(new GitHubError("net"))).toBe(true);
+    expect(isAmbiguousFailure(new GitHubError("bad gateway", 502))).toBe(true);
+    expect(isAmbiguousFailure(new GitHubError("forbidden", 403))).toBe(false);
+    expect(isAmbiguousFailure(new Error("other"))).toBe(false);
   });
 });
