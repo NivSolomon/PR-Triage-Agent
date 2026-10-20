@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { BudgetService, renderBudgetAlert } from "../budget/service.js";
 import type { ActionRecord } from "../store/actions.js";
 import type { ChatMessage, LlmPort, ToolCall } from "./llm.js";
+import { checkGrounding, numbersInToolOutput } from "./grounding.js";
 import { toPlainText } from "./plain.js";
 import { systemPrompt } from "./prompt.js";
 import { runTool, toolsFor } from "./tools.js";
@@ -92,6 +93,7 @@ export class Agent {
     ];
 
     let answer: string | null = null;
+    const fetched = new Set<number>();
     try {
       for (let round = 1; round <= limits.rounds && answer === null; round += 1) {
         const lastRound = round === limits.rounds;
@@ -117,7 +119,9 @@ export class Agent {
 
         messages.push({ role: "assistant", content: res.content, toolCalls: res.toolCalls });
         for (const call of res.toolCalls) {
-          messages.push({ role: "tool", toolCallId: call.id, content: await this.runCall(call, ctx) });
+          const output = await this.runCall(call, ctx);
+          for (const n of numbersInToolOutput(output)) fetched.add(n);
+          messages.push({ role: "tool", toolCallId: call.id, content: output });
         }
       }
     } catch (err) {
@@ -129,9 +133,15 @@ export class Agent {
       };
     }
 
-    const finalText = toPlainText(
+    const plain = toPlainText(
       answer ?? "I ran out of steps before I could answer. Please ask a narrower question.",
     );
+    const grounding = checkGrounding(plain, fetched, text);
+    if (grounding.ungrounded.length > 0) {
+      // The signal to watch in production: a rising count means the model is drifting.
+      console.warn(`[grounding] request ${requestId} mentioned PR numbers not in fetched data: ${grounding.ungrounded.join(",")}`);
+    }
+    const finalText = grounding.text;
     this.remember(input.conversationId, text, finalText);
     await this.maybeAlert();
     return { text: finalText, proposed };
