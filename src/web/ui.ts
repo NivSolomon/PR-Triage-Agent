@@ -12,22 +12,23 @@ export const INDEX_HTML = `<!doctype html>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PR Triage Agent</title>
 <style>
-  :root { color-scheme: light dark; --b:#8884; --muted:#777; --accent:#2563eb; }
-  body { font: 15px/1.45 system-ui, sans-serif; max-width: 920px; margin: 0 auto; padding: 16px; }
+  /* Explicit colours, not "color-scheme: light dark": some browsers then leave the page background unset and text unreadable. */
+  :root { color-scheme: light; --b:#cbd5e1; --muted:#64748b; --accent:#2563eb; }
+  body { font: 15px/1.45 system-ui, sans-serif; max-width: 920px; margin: 0 auto; padding: 16px; background: #fff; color: #0f172a; }
   h1 { font-size: 20px; margin: 0 0 4px; }
   h2 { font-size: 16px; margin: 24px 0 8px; }
   .muted { color: var(--muted); font-size: 13px; }
   section, .card { border: 1px solid var(--b); border-radius: 8px; padding: 12px; margin: 10px 0; }
   pre { white-space: pre-wrap; word-break: break-word; margin: 0; font: 13px/1.4 ui-monospace, monospace; }
-  button { font: inherit; padding: 6px 12px; border-radius: 6px; border: 1px solid var(--b); cursor: pointer; }
+  button { font: inherit; padding: 6px 12px; border-radius: 6px; border: 1px solid var(--b); cursor: pointer; background: #f8fafc; color: #0f172a; }
   button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
   button.danger { color: #b91c1c; }
   button:disabled { opacity: .5; cursor: default; }
-  input[type=text], input[type=password], textarea { font: inherit; width: 100%; box-sizing: border-box; padding: 8px; border-radius: 6px; border: 1px solid var(--b); }
+  input[type=text], input[type=password], textarea { font: inherit; width: 100%; box-sizing: border-box; padding: 8px; border-radius: 6px; border: 1px solid var(--b); background: #fff; color: #0f172a; }
   .row { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
   .bubble { padding: 8px 10px; border-radius: 8px; margin: 6px 0; white-space: pre-wrap; word-break: break-word; }
-  .me { background: #2563eb22; }
-  .bot { background: #8881; }
+  .me { background: #dbeafe; }
+  .bot { background: #f1f5f9; }
   .status { font-weight: 600; }
   .hidden { display: none; }
 </style>
