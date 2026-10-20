@@ -23,6 +23,26 @@ const MIGRATIONS: string[] = [
      error         TEXT
    );
    CREATE INDEX idx_actions_status ON pending_actions(status);`,
+  // One row per model call. request_id groups the calls of one user request.
+  `CREATE TABLE llm_usage (
+     id            INTEGER PRIMARY KEY AUTOINCREMENT,
+     ts            TEXT NOT NULL,
+     month         TEXT NOT NULL,
+     day           TEXT NOT NULL,
+     actor         TEXT NOT NULL,
+     request_id    TEXT NOT NULL,
+     purpose       TEXT NOT NULL,
+     model         TEXT NOT NULL,
+     input_tokens  INTEGER NOT NULL,
+     output_tokens INTEGER NOT NULL,
+     cost_usd      REAL NOT NULL
+   );
+   CREATE INDEX idx_usage_month ON llm_usage(month);
+   CREATE INDEX idx_usage_day_actor ON llm_usage(day, actor);
+   CREATE TABLE kv (
+     key   TEXT PRIMARY KEY,
+     value TEXT NOT NULL
+   );`,
 ];
 
 export function openDatabase(path: string): DatabaseSync {

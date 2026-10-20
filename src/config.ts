@@ -46,6 +46,8 @@ const schema = z.object({
 
   MONTHLY_BUDGET_USD: z.coerce.number().positive().default(50),
   HOSTING_COST_USD: z.coerce.number().nonnegative().default(7),
+  /** Per person per day. The brief assumes ~20 uses, so 40 leaves headroom without inviting abuse. */
+  DAILY_REQUESTS_PER_USER: z.coerce.number().int().positive().default(40),
 
   PORT: z.coerce.number().int().positive().default(3000),
   PUBLIC_BASE_URL: z.string().default("http://localhost:3000"),
