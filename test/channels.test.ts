@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { ApprovalError } from "../src/approvals/service.js";
 import {
+  commandWithQuestion,
   decide,
   encodeDecision,
   parseDecision,
@@ -106,5 +107,21 @@ describe("splitMessage", () => {
     expect(parts.length).toBeGreaterThan(1);
     expect(parts.every((p) => p.length <= 500)).toBe(true);
     expect(parts.join("\n")).toBe(long);
+  });
+});
+
+describe("commandWithQuestion", () => {
+  it("treats text after a command as a question", () => {
+    expect(commandWithQuestion("/queue leave a comment on #1 Well Done!")).toBe("leave a comment on #1 Well Done!");
+    expect(commandWithQuestion("/queue@my_bot what is blocking #3?")).toBe("what is blocking #3?");
+    expect(commandWithQuestion("/digest\nwhy is #2 last?")).toBe("why is #2 last?");
+  });
+
+  it("leaves bare commands, plain text and other commands alone", () => {
+    expect(commandWithQuestion("/queue")).toBeUndefined();
+    expect(commandWithQuestion("/queue   ")).toBeUndefined();
+    expect(commandWithQuestion("What should we review first?")).toBeUndefined();
+    expect(commandWithQuestion("/start hello")).toBeUndefined();
+    expect(commandWithQuestion(undefined)).toBeUndefined();
   });
 });

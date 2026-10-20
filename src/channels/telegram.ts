@@ -9,6 +9,7 @@ import type { ActionRecord } from "../store/actions.js";
 import { renderDigest } from "../scheduler/digest.js";
 import { buildQueue } from "../triage/queue.js";
 import {
+  commandWithQuestion,
   decide,
   encodeDecision,
   parseDecision,
@@ -84,7 +85,9 @@ export class TelegramChannel {
 
   /** Send plain text to a chat (digest, budget alerts). Long text is split. */
   async send(chatId: string | number, text: string): Promise<void> {
-    for (const part of splitMessage(text)) await this.bot.api.sendMessage(chatId, part);
+    for (const part of splitMessage(text)) {
+      await this.bot.api.sendMessage(chatId, part, { link_preview_options: { is_disabled: true } });
+    }
   }
 
   /** Send a budget or system notice to every approver (the team's owners). */
@@ -141,6 +144,14 @@ export class TelegramChannel {
       await next();
     });
 
+    // "/queue leave a comment on #1 ..." is a question, not the /queue command. Telegram would
+    // run the command and silently drop the rest, so route that text to the assistant instead.
+    bot.use(async (ctx, next) => {
+      const extra = commandWithQuestion(ctx.message?.text);
+      if (extra === undefined) return next();
+      this.ask(ctx, extra);
+    });
+
     bot.command(["start", "help"], (ctx) => ctx.reply(HELP));
 
     bot.command("queue", (ctx) =>
@@ -180,24 +191,24 @@ export class TelegramChannel {
 
     bot.on("callback_query:data", (ctx) => this.onDecision(ctx));
 
-    bot.on("message:text", (ctx) => {
-      const from = ctx.from;
-      const key = String(from.id);
-      if (this.busy.has(key)) {
-        return ctx.reply("I'm still working on your previous question. One moment.");
-      }
-      // Not awaited: a slow model call must not block other people's updates (or approvals).
-      this.busy.add(key);
-      void this.answer(ctx).finally(() => this.busy.delete(key));
-    });
+    bot.on("message:text", (ctx) => this.ask(ctx, ctx.message.text));
 
     bot.catch((err) => console.error("Telegram handler error:", err.message));
   }
 
-  private async answer(ctx: Context): Promise<void> {
+  /** Start answering a question without blocking other people's updates (or approvals). */
+  private ask(ctx: Context, text: string): void | Promise<unknown> {
+    const key = String(ctx.from?.id);
+    if (this.busy.has(key)) {
+      return ctx.reply("I'm still working on your previous question. One moment.");
+    }
+    this.busy.add(key);
+    void this.answer(ctx, text).finally(() => this.busy.delete(key));
+  }
+
+  private async answer(ctx: Context, text: string): Promise<void> {
     const from = ctx.from;
-    const text = ctx.message?.text;
-    if (!from || !text) return;
+    if (!from) return;
     try {
       await ctx.replyWithChatAction("typing");
       const actor = telegramActor(from.id);
@@ -268,6 +279,6 @@ export class TelegramChannel {
   }
 
   private async reply(ctx: Context, text: string): Promise<void> {
-    for (const part of splitMessage(text)) await ctx.reply(part);
+    for (const part of splitMessage(text)) await ctx.reply(part, { link_preview_options: { is_disabled: true } });
   }
 }

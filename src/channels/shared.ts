@@ -102,3 +102,13 @@ export function parseDecision(data: string | undefined): { kind: DecisionKind; i
   if (!m) return null;
   return { kind: m[1] === "a" ? "approve" : "reject", id: m[2] as string };
 }
+
+/**
+ * "/queue what is blocking #3?" is a question that happens to start with a command.
+ * Returns the question text, or undefined when the message is not that shape
+ * (plain text, a bare command, or a command that is not one of ours).
+ */
+export function commandWithQuestion(text: string | undefined): string | undefined {
+  const m = /^\/(?:queue|digest|budget|pending)(?:@\w+)?\s+(\S[\s\S]*)$/i.exec(text ?? "");
+  return m ? (m[1] as string).trim() : undefined;
+}
