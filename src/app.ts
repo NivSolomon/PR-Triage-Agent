@@ -1,3 +1,4 @@
+import type { Server } from "node:http";
 import { Agent } from "./agent/agent.js";
 import { OpenAiLlm } from "./agent/llm.js";
 import { ApprovalService } from "./approvals/service.js";
@@ -8,8 +9,11 @@ import type { Config } from "./config.js";
 import { GitHubClient } from "./github/client.js";
 import { runDigest, startDigestSchedule } from "./scheduler/digest.js";
 import type { SchedulerHandle } from "./scheduler/digest.js";
+import { createWebApp } from "./web/server.js";
 import { ActionRepository } from "./store/actions.js";
 import { openDatabase } from "./store/db.js";
+
+export const WEB_APPROVER_ACTOR = "web:approver";
 
 export interface App {
   config: Config;
@@ -24,8 +28,10 @@ export interface App {
 
 /** Who may approve. The ONLY definition of approval rights; every channel goes through it. */
 export function makeIsApprover(config: Config): (actorId: string) => boolean {
-  const telegram = new Set(config.APPROVER_TELEGRAM_IDS.map((id) => `telegram:${id}`));
-  return (actorId) => telegram.has(actorId);
+  const allowed = new Set(config.APPROVER_TELEGRAM_IDS.map((id) => `telegram:${id}`));
+  // The web approver identity exists only if an approver key is configured.
+  if (config.WEB_APPROVER_KEY) allowed.add(WEB_APPROVER_ACTOR);
+  return (actorId) => allowed.has(actorId);
 }
 
 /** Wire every part together. Fails fast with a clear message if a required secret is missing. */
@@ -79,6 +85,25 @@ export function createApp(config: Config): App {
     else await telegram.notifyApprovers(text);
   };
 
+  const web = createWebApp({
+    accessKey: config.WEB_ACCESS_KEY,
+    approverKey: config.WEB_APPROVER_KEY,
+    approverActor: WEB_APPROVER_ACTOR,
+    agent,
+    approvals,
+    github,
+    budget,
+    // A request made on the web page must reach the Telegram approvers too.
+    onProposed: async (record) => void (await telegram.sendApprovalCards(record)),
+    // A decision made on the web page: tell the Telegram user who asked.
+    onDecided: async (result) => {
+      const requester = result.record?.requestedBy;
+      if (requester?.startsWith("telegram:")) {
+        await telegram.send(requester.replace("telegram:", ""), `Your request #${result.record?.id.slice(0, 8)}: ${result.text}`);
+      }
+    },
+  });
+  let server: Server | undefined;
   let schedule: SchedulerHandle | undefined;
 
   return {
@@ -91,11 +116,17 @@ export function createApp(config: Config): App {
     async start() {
       // Validates the cron expression first, so a typo stops startup instead of never firing.
       schedule = startDigestSchedule(config.DIGEST_CRON, () => runDigest({ github, send: sendToTeam }));
+      await new Promise<void>((resolve, reject) => {
+        server = web.listen(config.PORT, () => resolve());
+        server.once("error", reject);
+      });
+      console.log(`Web interface on port ${config.PORT}`);
       await telegram.start();
     },
     async stop() {
       schedule?.stop();
       await telegram.stop();
+      await new Promise<void>((resolve) => (server ? server.close(() => resolve()) : resolve()));
       db.close();
     },
   };

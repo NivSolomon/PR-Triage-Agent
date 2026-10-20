@@ -51,7 +51,10 @@ const schema = z.object({
 
   PORT: z.coerce.number().int().positive().default(3000),
   PUBLIC_BASE_URL: z.string().default("http://localhost:3000"),
-  WEB_ACCESS_KEY: z.string().optional(),
+  /** Lets someone use the web page (read, chat, propose). Cannot approve. */
+  WEB_ACCESS_KEY: z.string().min(16, "use at least 16 characters").optional(),
+  /** Lets someone approve or reject from the web page. Must differ from WEB_ACCESS_KEY. */
+  WEB_APPROVER_KEY: z.string().min(16, "use at least 16 characters").optional(),
   MCP_TOKENS: jsonMap,
 
   DIGEST_CRON: z.string().default("30 8 * * 1-5"),

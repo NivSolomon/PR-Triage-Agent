@@ -110,6 +110,15 @@ export class ApprovalService {
     return this.opts.repo.list(["pending"]);
   }
 
+  /** Latest actions in any state: the audit trail shown on the web page. */
+  listRecent(limit = 20): ActionRecord[] {
+    this.opts.repo.expireOverdue(this.now().toISOString());
+    return this.opts.repo.list(
+      ["pending", "executing", "executed", "failed", "uncertain", "rejected", "expired"],
+      limit,
+    );
+  }
+
   get(id: string): ActionRecord | null {
     return this.opts.repo.get(id);
   }
