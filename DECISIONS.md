@@ -43,6 +43,8 @@ A dashboard can list; it cannot explain, and it cannot draft a comment that a hu
 
 | 5 | Budget guard and usage log (`src/budget`) | **It never goes over silently.** Every model call is stored with tokens and cost. Three modes (normal / economy / blocked) are decided from real recorded spend, hosting is subtracted first, and a small reserve means one in-flight request cannot push the month over. Each threshold alerts the team once, not on every request. Blocked mode still serves the ranked queue because that needs no model. See section 6 for the numbers. |
 
+| 6 | Agent loop, tools and prompt (`src/agent`) | The model gets three tools: `get_review_queue`, `get_pull_request`, `propose_comment`. There is deliberately **no approve tool**: approving is a human act in the channel. `propose_comment` is hidden from callers who may not propose *and* re-checked inside the executor, so a prompt trick cannot grant it. PR text (descriptions, comments) is returned in a separate `untrustedText` field and the prompt says to treat it as data, never instructions. Tool errors come back as results so the model reports them instead of inventing around them. The loop is capped (4 rounds, 2 in economy mode) and the last round offers no tools, which forces a written answer. Only plain Q&A text is kept as chat history, never tool output, so stale PR data is not replayed as fact. The model sits behind a small `LlmPort`, so tests use a scripted fake and cost nothing. |
+
 ### Failure halfway through an approved action (design, step 3)
 
 Each posted comment carries a hidden marker `<!-- pr-triage-agent:<id> -->`.
