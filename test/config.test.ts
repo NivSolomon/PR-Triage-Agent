@@ -10,6 +10,26 @@ describe("loadConfig", () => {
     expect(c.MCP_TOKENS).toEqual({});
   });
 
+  it("treats blank values (as copied from .env.example) as not set, not as invalid", () => {
+    const c = loadConfig({
+      GITHUB_REPO: "",
+      GITHUB_TOKEN: "",
+      WEB_ACCESS_KEY: "",
+      WEB_APPROVER_KEY: "  ",
+      TELEGRAM_DIGEST_CHAT_ID: "",
+      PORT: "",
+      MCP_TOKENS: "",
+    });
+    expect(c.GITHUB_REPO).toBeUndefined();
+    expect(c.WEB_ACCESS_KEY).toBeUndefined();
+    expect(c.PORT).toBe(3000); // blank falls back to the default
+    expect(c.MCP_TOKENS).toEqual({});
+  });
+
+  it("still rejects a value that is set but wrong", () => {
+    expect(() => loadConfig({ WEB_ACCESS_KEY: "short" })).toThrow(/at least 16/);
+  });
+
   it("parses comma separated ids and trims whitespace", () => {
     const c = loadConfig({ APPROVER_TELEGRAM_IDS: " 1, 2 ,,3 " });
     expect(c.APPROVER_TELEGRAM_IDS).toEqual(["1", "2", "3"]);

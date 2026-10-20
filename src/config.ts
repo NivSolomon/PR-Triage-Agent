@@ -74,7 +74,12 @@ export type Config = z.infer<typeof schema>;
  * via `requireConfig`, so the app (and the tests) can run with partial config.
  */
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
-  const result = schema.safeParse(env);
+  // A line like `WEB_ACCESS_KEY=` (as copied from .env.example) arrives as "". That means "not set",
+  // not "set to an invalid empty value", so drop blanks before validating.
+  const present = Object.fromEntries(
+    Object.entries(env).filter(([, v]) => v !== undefined && v.trim() !== ""),
+  );
+  const result = schema.safeParse(present);
   if (!result.success) {
     const details = result.error.issues
       .map((i) => `  - ${i.path.join(".")}: ${i.message}`)
