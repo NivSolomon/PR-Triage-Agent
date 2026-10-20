@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { BudgetService, renderBudgetAlert } from "../budget/service.js";
 import type { ActionRecord } from "../store/actions.js";
 import type { ChatMessage, LlmPort, ToolCall } from "./llm.js";
+import { toPlainText } from "./plain.js";
 import { systemPrompt } from "./prompt.js";
 import { runTool, toolsFor } from "./tools.js";
 import type { ToolContext, ToolDeps } from "./tools.js";
@@ -128,7 +129,9 @@ export class Agent {
       };
     }
 
-    const finalText = answer ?? "I ran out of steps before I could answer. Please ask a narrower question.";
+    const finalText = toPlainText(
+      answer ?? "I ran out of steps before I could answer. Please ask a narrower question.",
+    );
     this.remember(input.conversationId, text, finalText);
     await this.maybeAlert();
     return { text: finalText, proposed };

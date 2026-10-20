@@ -48,11 +48,9 @@ export const TOOL_SPECS: ToolSpec[] = [
       "Get the open pull requests ranked by what to review first, each with its state, score, " +
       "confidence, the facts behind the ranking, what is unknown, and a source link. " +
       "Use it for questions like 'what should we review first?'.",
-    parameters: {
-      type: "object",
-      properties: { limit: { type: "integer", minimum: 1, maximum: 20, description: "How many PRs to analyse (default 15)." } },
-      additionalProperties: false,
-    },
+    // No "limit" here on purpose: when the model chose it, it picked small numbers and silently
+    // left PRs out. The system decides how many to analyse and reports when more exist.
+    parameters: { type: "object", properties: {}, additionalProperties: false },
   },
   {
     name: "get_pull_request",
