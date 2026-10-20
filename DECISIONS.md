@@ -35,6 +35,7 @@ A dashboard can list; it cannot explain, and it cannot draft a comment that a hu
 | Step | What | Why |
 |---|---|---|
 | 1 | Project scaffold, typed config, tests | Fail fast on bad configuration; each feature checks only the secrets it needs. |
+| 2 | Read-only GitHub client (`list_open_prs`, `get_pr`) | Grounding starts here: every result carries its `sourceUrl`; PR text is truncated and treated as untrusted; CI that cannot be fetched is reported as unknown (`null`), never as passing; a reviewer's later plain comment does not erase their approval. Uses plain `fetch` + zod instead of Octokit to keep dependencies small and responses validated. |
 
 ## 5. Where AI helped and where it was wrong
 
