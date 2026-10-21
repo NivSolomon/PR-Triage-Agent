@@ -3,7 +3,7 @@ import { Agent } from "./agent/agent.js";
 import { OpenAiLlm } from "./agent/llm.js";
 import { ApprovalService } from "./approvals/service.js";
 import { BudgetService } from "./budget/service.js";
-import { TelegramChannel } from "./channels/telegram.js";
+import { SlackChannel } from "./channels/slack.js";
 import { requireConfig } from "./config.js";
 import type { Config } from "./config.js";
 import { GitHubClient } from "./github/client.js";
@@ -22,14 +22,14 @@ export interface App {
   approvals: ApprovalService;
   budget: BudgetService;
   agent: Agent;
-  telegram: TelegramChannel;
+  slack: SlackChannel;
   start(): Promise<void>;
   stop(): Promise<void>;
 }
 
 /** Who may approve. The ONLY definition of approval rights; every channel goes through it. */
 export function makeIsApprover(config: Config): (actorId: string) => boolean {
-  const allowed = new Set(config.APPROVER_TELEGRAM_IDS.map((id) => `telegram:${id}`));
+  const allowed = new Set(config.SLACK_APPROVER_USER_IDS.map((id) => `slack:${id}`));
   // The web approver identity exists only if an approver key is configured.
   if (config.WEB_APPROVER_KEY) allowed.add(WEB_APPROVER_ACTOR);
   return (actorId) => allowed.has(actorId);
@@ -41,7 +41,8 @@ export function createApp(config: Config): App {
     "GITHUB_TOKEN",
     "GITHUB_REPO",
     "LLM_API_KEY",
-    "TELEGRAM_BOT_TOKEN",
+    "SLACK_BOT_TOKEN",
+    "SLACK_APP_TOKEN",
   ] as const);
 
   const db = openDatabase(config.DATABASE_PATH);
@@ -69,21 +70,22 @@ export function createApp(config: Config): App {
     notifyTeam: (text) => notify(text),
   });
 
-  const telegram = new TelegramChannel({
-    token: env.TELEGRAM_BOT_TOKEN,
-    allowedIds: config.TELEGRAM_ALLOWED_USER_IDS,
-    approverIds: config.APPROVER_TELEGRAM_IDS,
+  const slack = new SlackChannel({
+    botToken: env.SLACK_BOT_TOKEN,
+    appToken: env.SLACK_APP_TOKEN,
+    allowedIds: config.SLACK_ALLOWED_USER_IDS,
+    approverIds: config.SLACK_APPROVER_USER_IDS,
     agent,
     approvals,
     github,
     budget,
   });
-  notify = (text) => telegram.notifyApprovers(text);
+  notify = (text) => slack.notifyApprovers(text);
 
-  /** Where scheduled messages go: the digest chat if set, otherwise every approver. */
+  /** Where scheduled messages go: the digest channel if set, otherwise every approver (as a DM). */
   const sendToTeam = async (text: string): Promise<void> => {
-    if (config.TELEGRAM_DIGEST_CHAT_ID) await telegram.send(config.TELEGRAM_DIGEST_CHAT_ID, text);
-    else await telegram.notifyApprovers(text);
+    if (config.SLACK_DIGEST_CHANNEL_ID) await slack.send(config.SLACK_DIGEST_CHANNEL_ID, text);
+    else await slack.notifyApprovers(text);
   };
 
   const web = createWebApp({
@@ -94,8 +96,8 @@ export function createApp(config: Config): App {
     approvals,
     github,
     budget,
-    // A request made on the web page must reach the Telegram approvers too.
-    onProposed: async (record) => void (await telegram.sendApprovalCards(record)),
+    // A request made on the web page must reach the Slack approvers too.
+    onProposed: async (record) => void (await slack.sendApprovalCards(record)),
     mount: (expressApp) =>
       expressApp.use(
         "/mcp",
@@ -103,14 +105,14 @@ export function createApp(config: Config): App {
           tokens: config.MCP_TOKENS,
           agent,
           tools: { github, approvals },
-          onProposed: async (record) => void (await telegram.sendApprovalCards(record)),
+          onProposed: async (record) => void (await slack.sendApprovalCards(record)),
         }),
       ),
-    // A decision made on the web page: tell the Telegram user who asked.
+    // A decision made on the web page: tell the Slack user who asked.
     onDecided: async (result) => {
       const requester = result.record?.requestedBy;
-      if (requester?.startsWith("telegram:")) {
-        await telegram.send(requester.replace("telegram:", ""), `Your request #${result.record?.id.slice(0, 8)}: ${result.text}`);
+      if (requester?.startsWith("slack:")) {
+        await slack.send(requester.replace("slack:", ""), `Your request #${result.record?.id.slice(0, 8)}: ${result.text}`);
       }
     },
   });
@@ -123,7 +125,7 @@ export function createApp(config: Config): App {
     approvals,
     budget,
     agent,
-    telegram,
+    slack,
     async start() {
       // Validates the cron expression first, so a typo stops startup instead of never firing.
       schedule = startDigestSchedule(config.DIGEST_CRON, () => runDigest({ github, send: sendToTeam }));
@@ -132,11 +134,11 @@ export function createApp(config: Config): App {
         server.once("error", reject);
       });
       console.log(`Web interface on port ${config.PORT}`);
-      await telegram.start();
+      await slack.start();
     },
     async stop() {
       schedule?.stop();
-      await telegram.stop();
+      await slack.stop();
       await new Promise<void>((resolve) => (server ? server.close(() => resolve()) : resolve()));
       db.close();
     },

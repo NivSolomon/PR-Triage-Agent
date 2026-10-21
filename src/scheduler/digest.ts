@@ -32,7 +32,7 @@ export function renderDigest(q: QueueResult): string {
   if (review.length > 0) {
     lines.push(`Review first (${review.length} waiting):`);
     review.slice(0, TOP_N).forEach((a) => lines.push(brief(a)));
-    if (review.length > TOP_N) lines.push(`  ...and ${review.length - TOP_N} more. Send /queue for the full list.`);
+    if (review.length > TOP_N) lines.push(`  ...and ${review.length - TOP_N} more. Send /triage queue for the full list.`);
     lines.push(``);
   } else {
     lines.push(`Nothing is waiting on a reviewer right now.`, ``);
@@ -75,7 +75,7 @@ export async function runDigest(deps: DigestDeps): Promise<{ ok: boolean }> {
     const reason = err instanceof Error ? err.message : String(err);
     console.error("Digest failed:", reason);
     try {
-      await deps.send(`The scheduled PR digest could not be built: ${reason}\nSend /queue to try again by hand.`);
+      await deps.send(`The scheduled PR digest could not be built: ${reason}\nSend /triage queue to try again by hand.`);
     } catch (sendErr) {
       console.error("Digest failure notice could not be delivered:", sendErr instanceof Error ? sendErr.message : sendErr);
     }

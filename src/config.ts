@@ -10,6 +10,9 @@ const csv = z
       .filter(Boolean),
   );
 
+/** Slack member ids look like U01ABCDEF (or W... on Enterprise Grid). Rejects leftover numeric Telegram ids. */
+const slackIds = csv.pipe(z.array(z.string().regex(/^[UW][A-Z0-9]{2,}$/, "must be a Slack member id like U01ABCDEF")));
+
 const jsonMap = z
   .string()
   .default("{}")
@@ -31,10 +34,16 @@ const jsonMap = z
   });
 
 const schema = z.object({
-  TELEGRAM_BOT_TOKEN: z.string().optional(),
-  TELEGRAM_ALLOWED_USER_IDS: csv,
-  APPROVER_TELEGRAM_IDS: csv,
-  TELEGRAM_DIGEST_CHAT_ID: z.string().optional(),
+  /** Bot token (xoxb-...): lets the app post messages. */
+  SLACK_BOT_TOKEN: z.string().startsWith("xoxb-", "must be a bot token starting with xoxb-").optional(),
+  /** App-level token (xapp-...) with connections:write: opens the Socket Mode connection. */
+  SLACK_APP_TOKEN: z.string().startsWith("xapp-", "must be an app-level token starting with xapp-").optional(),
+  /** Slack member ids allowed to chat with the bot. Approvers are always allowed too. */
+  SLACK_ALLOWED_USER_IDS: slackIds,
+  /** Slack member ids allowed to approve or reject. */
+  SLACK_APPROVER_USER_IDS: slackIds,
+  /** Channel id (C...) for the scheduled digest. If unset, the digest is sent to each approver as a DM. */
+  SLACK_DIGEST_CHANNEL_ID: z.string().regex(/^[CG][A-Z0-9]{2,}$/, "must be a Slack channel id like C01ABCDEF").optional(),
 
   GITHUB_TOKEN: z.string().optional(),
   GITHUB_REPO: z

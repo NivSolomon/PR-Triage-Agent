@@ -30,7 +30,7 @@ type GitHubPort = Pick<GitHubClient, "getPrSummary" | "postComment" | "findComme
 export interface ApprovalServiceOptions {
   github: GitHubPort;
   repo: ActionRepository;
-  /** Identity check, e.g. "telegram:123". The ONLY place approval rights are decided. */
+  /** Identity check, e.g. "slack:U01ABC". The ONLY place approval rights are decided. */
   isApprover: (actorId: string) => boolean;
   now?: () => Date;
   newId?: () => string;
@@ -41,9 +41,9 @@ export interface ProposeInput {
   prNumber: number;
   body: string;
   reason: string;
-  /** Who/what asked, e.g. "telegram:123" or "mcp:reader-bot". Recorded for the approver. */
+  /** Who/what asked, e.g. "slack:U01ABC" or "mcp:reader-bot". Recorded for the approver. */
   requestedBy: string;
-  /** Channel it came from: "telegram" | "mcp" | "web". */
+  /** Channel it came from: "slack" | "mcp" | "web". */
   via: string;
 }
 

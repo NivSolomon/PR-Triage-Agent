@@ -8,10 +8,10 @@ import { buildQueue } from "../triage/queue.js";
 
 /** Who is asking and what they may do. Checked inside the tools, not just in the prompt. */
 export interface ToolContext {
-  /** e.g. "telegram:123", "mcp:ci-bot", "web". Recorded on every proposal. */
+  /** e.g. "slack:U01ABC", "mcp:reader:ab12cd34", "web:approver". Recorded on every proposal. */
   actor: string;
   /** Channel the request came through. */
-  via: "telegram" | "web" | "mcp" | "scheduler";
+  via: "slack" | "web" | "mcp" | "scheduler";
   /** May this caller ask for a comment to be proposed? (Approving is never a tool.) */
   canPropose: boolean;
   /** Called with each action the agent proposed in this request, so the channel can show an approval card. */

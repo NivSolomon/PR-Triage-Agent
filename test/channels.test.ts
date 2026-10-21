@@ -1,10 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { ApprovalError } from "../src/approvals/service.js";
 import {
-  commandWithQuestion,
   decide,
-  encodeDecision,
-  parseDecision,
   renderQueue,
   splitMessage,
 } from "../src/channels/shared.js";
@@ -56,24 +53,12 @@ describe("renderQueue", () => {
   });
 });
 
-describe("decision callbacks", () => {
-  it("round-trips and rejects malformed or oversized payloads", () => {
-    expect(parseDecision(encodeDecision("approve", "abc-123"))).toEqual({ kind: "approve", id: "abc-123" });
-    expect(parseDecision(encodeDecision("reject", "abc-123"))).toEqual({ kind: "reject", id: "abc-123" });
-    expect(parseDecision("x:abc")).toBeNull();
-    expect(parseDecision("a:")).toBeNull();
-    expect(parseDecision("a:../../etc")).toBeNull();
-    expect(parseDecision(undefined)).toBeNull();
-    expect(encodeDecision("approve", "11111111-2222-3333-4444-555555555555").length).toBeLessThanOrEqual(64);
-  });
-});
-
 describe("decide", () => {
   const record = (status: string) => ({ status, prNumber: 7, prUrl: "https://x/7", resultUrl: "https://x/7#c", error: null });
 
   it("turns an approval into a plain outcome message", async () => {
     const approvals = { approve: vi.fn(async () => record("executed")), reject: vi.fn() };
-    const r = await decide(approvals as never, "approve", "id", "telegram:1");
+    const r = await decide(approvals as never, "approve", "id", "slack:U01");
     expect(r.ok).toBe(true);
     expect(r.text).toMatch(/Posted the comment on #7/);
   });
@@ -85,7 +70,7 @@ describe("decide", () => {
       }),
       reject: vi.fn(),
     };
-    const r = await decide(approvals as never, "approve", "id", "telegram:9");
+    const r = await decide(approvals as never, "approve", "id", "slack:U09");
     expect(r.ok).toBe(false);
     expect(r.text).toMatch(/not allowed/);
   });
@@ -93,7 +78,7 @@ describe("decide", () => {
   it("does not leak internal errors, and says nothing changed", async () => {
     vi.spyOn(console, "error").mockImplementation(() => undefined);
     const approvals = { approve: vi.fn(async () => { throw new Error("SQLITE_CORRUPT: secret path"); }), reject: vi.fn() };
-    const r = await decide(approvals as never, "approve", "id", "telegram:1");
+    const r = await decide(approvals as never, "approve", "id", "slack:U01");
     expect(r.text).not.toMatch(/SQLITE|secret/);
     expect(r.text).toMatch(/nothing was changed/i);
   });
@@ -107,21 +92,5 @@ describe("splitMessage", () => {
     expect(parts.length).toBeGreaterThan(1);
     expect(parts.every((p) => p.length <= 500)).toBe(true);
     expect(parts.join("\n")).toBe(long);
-  });
-});
-
-describe("commandWithQuestion", () => {
-  it("treats text after a command as a question", () => {
-    expect(commandWithQuestion("/queue leave a comment on #1 Well Done!")).toBe("leave a comment on #1 Well Done!");
-    expect(commandWithQuestion("/queue@my_bot what is blocking #3?")).toBe("what is blocking #3?");
-    expect(commandWithQuestion("/digest\nwhy is #2 last?")).toBe("why is #2 last?");
-  });
-
-  it("leaves bare commands, plain text and other commands alone", () => {
-    expect(commandWithQuestion("/queue")).toBeUndefined();
-    expect(commandWithQuestion("/queue   ")).toBeUndefined();
-    expect(commandWithQuestion("What should we review first?")).toBeUndefined();
-    expect(commandWithQuestion("/start hello")).toBeUndefined();
-    expect(commandWithQuestion(undefined)).toBeUndefined();
   });
 });

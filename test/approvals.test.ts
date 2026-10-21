@@ -5,8 +5,8 @@ import { GitHubError } from "../src/github/client.js";
 import { ActionRepository } from "../src/store/actions.js";
 import { openDatabase } from "../src/store/db.js";
 
-const APPROVER = "telegram:1";
-const OUTSIDER = "telegram:2";
+const APPROVER = "slack:U01";
+const OUTSIDER = "slack:U02";
 
 function setup(overrides: { postComment?: ReturnType<typeof vi.fn>; findComment?: ReturnType<typeof vi.fn> } = {}) {
   const github = {
@@ -46,8 +46,8 @@ const proposal = {
   prNumber: 7,
   body: "CI is failing on unit tests; please fix before review.",
   reason: "unit check is red since yesterday",
-  requestedBy: "telegram:3",
-  via: "telegram",
+  requestedBy: "slack:U03",
+  via: "slack",
 };
 
 describe("propose", () => {
@@ -220,7 +220,7 @@ describe("approval card", () => {
     expect(card).toContain("https://github.com/acme/app/pull/7");
     expect(card).toContain(`> ${proposal.body}`);
     expect(card).toContain(proposal.reason);
-    expect(card).toContain("telegram:3");
+    expect(card).toContain("slack:U03");
     expect(card).toContain("Expires");
   });
 });

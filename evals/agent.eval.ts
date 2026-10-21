@@ -118,7 +118,7 @@ describe("[offline] budget and outages", () => {
     const res = await rig.ask("What should we review first?");
     expect(res.refusedBecause).toBe("monthly_budget");
     expect(res.text).toMatch(/budget/i);
-    expect(res.text).toMatch(/\/queue/);
+    expect(res.text).toMatch(/\/triage queue/);
   });
 
   it("12. a model outage becomes a clear message, not an invented answer", async () => {

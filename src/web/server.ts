@@ -24,7 +24,7 @@ export interface WebDeps {
   approvals: ApprovalService;
   github: Pick<GitHubClient, "listOpenPrs" | "getPr" | "repo">;
   budget: BudgetService;
-  /** A request created from the web page: lets Telegram approvers get the card too. */
+  /** A request created from the web page: lets Slack approvers get the card too. */
   onProposed?: (record: ActionRecord) => Promise<void> | void;
   /** A decision taken on the web page: lets the requester be told. */
   onDecided?: (result: DecisionResult) => Promise<void> | void;

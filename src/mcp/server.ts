@@ -17,7 +17,7 @@ import { FailureThrottle, bearerToken, sameSecret } from "../web/throttle.js";
  *   proposer  everything a reader can, plus CREATE a comment request
  *
  * No role can approve or post. A proposal only creates a pending request that a human
- * approver must approve in Telegram or on the web page. The tool for proposing is not even
+ * approver must approve in Slack or on the web page. The tool for proposing is not even
  * listed for readers, and the executor re-checks the permission (see agent/tools.ts).
  */
 export type McpRole = "reader" | "proposer";
@@ -119,7 +119,7 @@ export function buildMcpServer(caller: Caller, deps: McpDeps): McpServer {
       {
         title: "Propose a PR comment (needs human approval)",
         description:
-          "Create a request to post a comment on a pull request. NOTHING is posted: a human approver must approve the exact text in Telegram or on the web page first. Returns the pending request id.",
+          "Create a request to post a comment on a pull request. NOTHING is posted: a human approver must approve the exact text in Slack or on the web page first. Returns the pending request id.",
         inputSchema: {
           prNumber: z.number().int().positive(),
           body: z.string().min(1).max(2000),

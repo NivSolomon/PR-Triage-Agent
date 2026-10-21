@@ -113,7 +113,7 @@ export class BudgetService {
         reason: "monthly_budget",
         message:
           "The monthly AI budget is used up, so I can't run new analyses with the model until next month. " +
-          "The ranked review queue (/queue) still works because it uses no AI credit.",
+          "The ranked review queue (/triage queue) still works because it uses no AI credit.",
         summary,
       };
     }
@@ -123,7 +123,7 @@ export class BudgetService {
         allowed: false,
         level: "blocked",
         reason: "daily_limit",
-        message: `You've reached today's limit of ${this.o.dailyRequestsPerActor} requests. It resets at 00:00 UTC. The ranked queue (/queue) is still available.`,
+        message: `You've reached today's limit of ${this.o.dailyRequestsPerActor} requests. It resets at 00:00 UTC. The ranked queue (/triage queue) is still available.`,
         summary,
       };
     }

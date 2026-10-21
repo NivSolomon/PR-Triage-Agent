@@ -18,7 +18,7 @@ export interface AgentOptions {
 }
 
 export interface AskInput {
-  /** Groups follow-up questions, e.g. "telegram:chat:42". */
+  /** Groups follow-up questions, e.g. "slack:D01ABC:U01ABC". */
   conversationId: string;
   text: string;
   actor: string;
@@ -127,7 +127,7 @@ export class Agent {
     } catch (err) {
       console.error("LLM call failed:", err instanceof Error ? err.message : err);
       return {
-        text: "I couldn't reach the AI model just now, so I can't answer that. Please try again in a minute; /queue still shows the ranked list.",
+        text: "I couldn't reach the AI model just now, so I can't answer that. Please try again in a minute; the ranked queue (/triage queue) still works.",
         proposed,
         refusedBecause: "model_unavailable",
       };

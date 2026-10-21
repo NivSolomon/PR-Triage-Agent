@@ -94,8 +94,8 @@ function setup(script: Script, budgetOver: Partial<ConstructorParameters<typeof 
 const ask = (text: string, over: Partial<Parameters<Agent["ask"]>[0]> = {}) => ({
   conversationId: "c1",
   text,
-  actor: "telegram:1",
-  via: "telegram" as const,
+  actor: "slack:U01",
+  via: "slack" as const,
   canPropose: true,
   ...over,
 });
@@ -180,8 +180,8 @@ describe("Agent loop", () => {
 describe("Tools and permissions", () => {
   const readerCtx: ToolContext = { actor: "mcp:reader", via: "mcp", canPropose: false };
   const proposerCtx = (sink: unknown[]): ToolContext => ({
-    actor: "telegram:1",
-    via: "telegram",
+    actor: "slack:U01",
+    via: "slack",
     canPropose: true,
     onProposed: (a) => sink.push(a),
   });
@@ -218,7 +218,7 @@ describe("Tools and permissions", () => {
     expect(parsed.status).toBe("pending_approval");
     expect(parsed.note).toMatch(/NOT posted/);
     expect(approvals.propose).toHaveBeenCalledWith(
-      expect.objectContaining({ requestedBy: "telegram:1", via: "telegram", body: "Please fix CI" }),
+      expect.objectContaining({ requestedBy: "slack:U01", via: "slack", body: "Please fix CI" }),
     );
     expect(sink).toHaveLength(1);
   });

@@ -6,7 +6,7 @@ describe("loadConfig", () => {
     const c = loadConfig({});
     expect(c.PORT).toBe(3000);
     expect(c.MONTHLY_BUDGET_USD).toBe(50);
-    expect(c.TELEGRAM_ALLOWED_USER_IDS).toEqual([]);
+    expect(c.SLACK_ALLOWED_USER_IDS).toEqual([]);
     expect(c.MCP_TOKENS).toEqual({});
   });
 
@@ -16,7 +16,7 @@ describe("loadConfig", () => {
       GITHUB_TOKEN: "",
       WEB_ACCESS_KEY: "",
       WEB_APPROVER_KEY: "  ",
-      TELEGRAM_DIGEST_CHAT_ID: "",
+      SLACK_DIGEST_CHANNEL_ID: "",
       PORT: "",
       MCP_TOKENS: "",
     });
@@ -30,9 +30,26 @@ describe("loadConfig", () => {
     expect(() => loadConfig({ WEB_ACCESS_KEY: "short" })).toThrow(/at least 16/);
   });
 
-  it("parses comma separated ids and trims whitespace", () => {
-    const c = loadConfig({ APPROVER_TELEGRAM_IDS: " 1, 2 ,,3 " });
-    expect(c.APPROVER_TELEGRAM_IDS).toEqual(["1", "2", "3"]);
+  it("parses comma separated Slack member ids and trims whitespace", () => {
+    const c = loadConfig({ SLACK_APPROVER_USER_IDS: " U01ABC, U02DEF ,,W03GHI " });
+    expect(c.SLACK_APPROVER_USER_IDS).toEqual(["U01ABC", "U02DEF", "W03GHI"]);
+  });
+
+  it("rejects ids that are not Slack member ids (e.g. leftover numeric Telegram ids)", () => {
+    expect(() => loadConfig({ SLACK_APPROVER_USER_IDS: "123456789" })).toThrow(/Slack member id/);
+    expect(() => loadConfig({ SLACK_ALLOWED_USER_IDS: "U01ABC, someone" })).toThrow(/Slack member id/);
+  });
+
+  it("checks the Slack token prefixes so a swapped pair fails with a clear message", () => {
+    expect(() => loadConfig({ SLACK_BOT_TOKEN: "xapp-1-abc" })).toThrow(/xoxb-/);
+    expect(() => loadConfig({ SLACK_APP_TOKEN: "xoxb-123" })).toThrow(/xapp-/);
+    const c = loadConfig({ SLACK_BOT_TOKEN: "xoxb-123", SLACK_APP_TOKEN: "xapp-1-abc", SLACK_DIGEST_CHANNEL_ID: "C01ABC" });
+    expect(c.SLACK_BOT_TOKEN).toBe("xoxb-123");
+    expect(c.SLACK_DIGEST_CHANNEL_ID).toBe("C01ABC");
+  });
+
+  it("rejects a digest target that is not a channel id", () => {
+    expect(() => loadConfig({ SLACK_DIGEST_CHANNEL_ID: "#general" })).toThrow(/channel id/);
   });
 
   it("parses the MCP token map", () => {

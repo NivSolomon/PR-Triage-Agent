@@ -55,7 +55,7 @@ describe("levels", () => {
     if (!g.allowed) {
       expect(g.reason).toBe("monthly_budget");
       expect(g.message).toMatch(/budget is used up/);
-      expect(g.message).toMatch(/\/queue/);
+      expect(g.message).toMatch(/\/triage queue/);
     }
   });
 

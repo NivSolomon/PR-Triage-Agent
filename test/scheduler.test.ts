@@ -90,7 +90,7 @@ describe("runDigest", () => {
   it("does not crash if even the failure notice cannot be delivered", async () => {
     vi.spyOn(console, "error").mockImplementation(() => undefined);
     const send = vi.fn(async () => {
-      throw new Error("telegram down");
+      throw new Error("slack down");
     });
     const r = await runDigest({ github: github(async () => []), send });
     expect(r.ok).toBe(false);
