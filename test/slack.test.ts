@@ -403,7 +403,7 @@ describe("identity", () => {
     expect(slackActor("U0BOSS")).toBe("slack:U0BOSS");
     expect(channel.isApprover("slack:U0BOSS")).toBe(true);
     expect(channel.isApprover("slack:U0ALICE")).toBe(false);
-    expect(channel.isApprover("telegram:U0BOSS")).toBe(false);
+    expect(channel.isApprover("web:U0BOSS")).toBe(false);
   });
 });
 

@@ -10,7 +10,7 @@ const csv = z
       .filter(Boolean),
   );
 
-/** Slack member ids look like U01ABCDEF (or W... on Enterprise Grid). Rejects leftover numeric Telegram ids. */
+/** Slack member ids look like U01ABCDEF (or W... on Enterprise Grid). Rejects other kinds of ids, such as plain numbers. */
 const slackIds = csv.pipe(z.array(z.string().regex(/^[UW][A-Z0-9]{2,}$/, "must be a Slack member id like U01ABCDEF")));
 
 /** "U01ABCDEF:octocat,U02XYZ123:hubot": which GitHub login each Slack member is (for the personal queue). */
@@ -81,7 +81,6 @@ const schema = z.object({
   DAILY_REQUESTS_PER_USER: z.coerce.number().int().positive().default(40),
 
   PORT: z.coerce.number().int().positive().default(3000),
-  PUBLIC_BASE_URL: z.string().default("http://localhost:3000"),
   /** Lets someone use the web page (read, chat, propose). Cannot approve. */
   WEB_ACCESS_KEY: z.string().min(16, "use at least 16 characters").optional(),
   /** Lets someone approve or reject from the web page. Must differ from WEB_ACCESS_KEY. */

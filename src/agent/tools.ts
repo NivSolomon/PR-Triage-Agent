@@ -43,7 +43,7 @@ const proposeArgs = z.object({
   reason: z.string().min(1).max(500),
 });
 
-export const TOOL_SPECS: ToolSpec[] = [
+const TOOL_SPECS: ToolSpec[] = [
   {
     name: "get_review_queue",
     description:

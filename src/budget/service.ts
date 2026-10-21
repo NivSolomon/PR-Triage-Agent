@@ -16,9 +16,9 @@ import type { DatabaseSync } from "node:sqlite";
 
 export type BudgetLevel = "normal" | "economy" | "blocked";
 
-export const ECONOMY_RATIO = 0.8;
+const ECONOMY_RATIO = 0.8;
 /** Kept in reserve so one in-flight request cannot push the month over the line. */
-export const RESERVE_USD = 0.1;
+const RESERVE_USD = 0.1;
 
 export interface BudgetOptions {
   db: DatabaseSync;

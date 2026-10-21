@@ -14,7 +14,7 @@ import { createWebApp } from "./web/server.js";
 import { ActionRepository } from "./store/actions.js";
 import { openDatabase } from "./store/db.js";
 
-export const WEB_APPROVER_ACTOR = "web:approver";
+const WEB_APPROVER_ACTOR = "web:approver";
 
 export interface App {
   config: Config;

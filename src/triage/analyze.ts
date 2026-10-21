@@ -54,7 +54,7 @@ export interface TriageAssessment {
 
 const HOUR = 3_600_000;
 
-export const THRESHOLDS = {
+const THRESHOLDS = {
   /** Lines changed (additions + deletions) at or below which a PR is "small". */
   smallLines: 150,
   /** Lines changed at or above which a PR is "large". Review quality falls as a change grows, so both are judgment calls. */

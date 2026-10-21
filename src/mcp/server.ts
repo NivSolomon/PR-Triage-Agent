@@ -53,7 +53,7 @@ function identify(tokens: Record<string, McpRole>, given: string): Caller | null
 const text = (t: string, isError = false) => ({ content: [{ type: "text" as const, text: t }], ...(isError ? { isError } : {}) });
 
 /** Build the server for ONE caller, exposing only the tools their role allows. */
-export function buildMcpServer(caller: Caller, deps: McpDeps): McpServer {
+function buildMcpServer(caller: Caller, deps: McpDeps): McpServer {
   const server = new McpServer({ name: "pr-triage-agent", version: "0.1.0" });
   const ctx: ToolContext = {
     actor: caller.actor,

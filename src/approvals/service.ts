@@ -21,7 +21,7 @@ export class ApprovalError extends Error {
   }
 }
 
-export const MAX_COMMENT_LENGTH = 2000;
+const MAX_COMMENT_LENGTH = 2000;
 const MAX_PENDING = 20;
 const DEFAULT_TTL_MS = 24 * 60 * 60 * 1000;
 

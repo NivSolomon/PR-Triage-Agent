@@ -30,7 +30,7 @@ Design reasoning, trade-offs, cost estimate, evals and the answers to the unders
    - **Slack approvers** (`SLACK_APPROVER_USER_IDS`) receive the card as a direct message from the app with **Approve and post** (asks "Post this comment?" first) and **Reject** buttons.
    - **Web approver key** (`WEB_APPROVER_KEY`): sign in on the web page with it and use the buttons under **Approvals**. This is how testers can approve without being a Slack approver.
    - The access key and MCP tokens can **never** approve.
-5. **MCP:** `POST {PUBLIC_BASE_URL}/mcp` with `Authorization: Bearer <token>` (Streamable HTTP, stateless). Tools: `get_review_queue`, `get_pull_request`, `ask_triage_agent`, and `propose_comment` for `proposer` tokens only.
+5. **MCP:** `POST https://<your-host>/mcp` with `Authorization: Bearer <token>` (Streamable HTTP, stateless). Tools: `get_review_queue`, `get_pull_request`, `ask_triage_agent`, and `propose_comment` for `proposer` tokens only.
 
 ## Slack setup (5 minutes, once)
 
@@ -84,7 +84,7 @@ Secrets are **never committed**. Locally they live in `.env` (git-ignored); in p
 | `MCP_TOKENS` | for MCP | JSON `{"<16+ char token>":"reader"\|"proposer"}` |
 | `MONTHLY_BUDGET_USD`, `HOSTING_COST_USD`, `DAILY_REQUESTS_PER_USER` | no | Defaults 50, 7, 40 |
 | `DIGEST_CRON`, `TZ` | no | Default `30 8 * * 1-5`, server time zone |
-| `PORT`, `PUBLIC_BASE_URL`, `DATABASE_PATH` | no | Defaults 3000, localhost, `./data/agent.sqlite` |
+| `PORT`, `DATABASE_PATH` | no | Defaults 3000 and `./data/agent.sqlite` |
 
 Generate strong keys with:
 
@@ -108,8 +108,7 @@ fly secrets set \
   SLACK_BOT_TOKEN=xoxb-... SLACK_APP_TOKEN=xapp-... \
   SLACK_ALLOW_ALL_MEMBERS=true SLACK_APPROVER_USER_IDS=U01AAAAAA \
   WEB_ACCESS_KEY=... WEB_APPROVER_KEY=... \
-  MCP_TOKENS='{"<token-1>":"reader","<token-2>":"proposer"}' \
-  PUBLIC_BASE_URL=https://<your-app>.fly.dev
+  MCP_TOKENS='{"<token-1>":"reader","<token-2>":"proposer"}'
 fly deploy
 fly status && curl https://<your-app>.fly.dev/healthz
 ```

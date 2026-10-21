@@ -14,7 +14,6 @@ import type { DecisionKind } from "./shared.js";
 
 /** Slack recommends keeping a message under ~4000 characters; a block's text is limited to 3000. */
 const MESSAGE_MAX = 3500;
-const BLOCK_TEXT_MAX = 2900;
 
 export const APPROVE_ACTION = "decision_approve";
 export const REJECT_ACTION = "decision_reject";
@@ -38,7 +37,7 @@ export interface SlackApi {
 }
 
 /** Posts through Slack's Web API with formatting and link previews switched off. */
-export class BoltSlackApi implements SlackApi {
+class BoltSlackApi implements SlackApi {
   private readonly dms = new Map<string, string>();
 
   constructor(private readonly client: WebClient) {}

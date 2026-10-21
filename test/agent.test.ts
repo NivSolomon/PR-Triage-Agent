@@ -104,7 +104,7 @@ const ask = (text: string, over: Partial<Parameters<Agent["ask"]>[0]> = {}) => (
 
 describe("Agent loop", () => {
   it("calls a tool, feeds the result back, records usage and returns the answer", async () => {
-    const { agent, github, requests, budget } = setup((req, call) =>
+    const { agent, github, requests, budget } = setup((_req, call) =>
       call === 1
         ? { toolCalls: [{ id: "t1", name: "get_review_queue", arguments: "{}" }] }
         : { content: "Review PR 1 first." },
@@ -166,7 +166,7 @@ describe("Agent loop", () => {
   });
 
   it("remembers plain Q&A between turns but never replays tool output", async () => {
-    const { agent, requests } = setup((req, call) =>
+    const { agent, requests } = setup((_req, call) =>
       call === 1
         ? { toolCalls: [{ id: "t1", name: "get_pull_request", arguments: '{"number":1}' }] }
         : { content: "answer" },

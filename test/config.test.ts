@@ -35,7 +35,7 @@ describe("loadConfig", () => {
     expect(c.SLACK_APPROVER_USER_IDS).toEqual(["U01ABC", "U02DEF", "W03GHI"]);
   });
 
-  it("rejects ids that are not Slack member ids (e.g. leftover numeric Telegram ids)", () => {
+  it("rejects ids that are not Slack member ids (e.g. plain numbers)", () => {
     expect(() => loadConfig({ SLACK_APPROVER_USER_IDS: "123456789" })).toThrow(/Slack member id/);
     expect(() => loadConfig({ SLACK_ALLOWED_USER_IDS: "U01ABC, someone" })).toThrow(/Slack member id/);
   });
