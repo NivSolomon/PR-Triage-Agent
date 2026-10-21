@@ -20,6 +20,7 @@ export const prUrl = (n: number) => `https://github.com/${REPO}/pull/${n}`;
 const green = { total: 3, passing: 3, failing: [], pending: [], sourceUrl: "https://example.test/checks" };
 
 const base = (number: number, title: string, over: Partial<PrDetail> = {}): PrDetail => ({
+  readySince: over.createdAt ?? ago(30),
   number,
   title,
   author: "dana",
@@ -52,7 +53,7 @@ export const FIXTURE_PRS: PrDetail[] = [
   base(103, "WIP: new settings page", { author: "lee", draft: true }),
   base(104, "Bump dependencies", {
     author: "kim",
-    reviews: [{ reviewer: "dana", state: "APPROVED", submittedAt: ago(2) }],
+    reviews: [{ reviewer: "dana", state: "APPROVED", submittedAt: ago(2), commitId: "sha104" }],
     createdAt: ago(60),
   }),
   base(105, "Refactor billing module", { author: "ori", checks: null, mergeableState: null }),

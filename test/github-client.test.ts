@@ -1,4 +1,4 @@
-﻿import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { GitHubClient, GitHubError, isAmbiguousFailure, truncate } from "../src/github/client.js";
 
 type Route = unknown | { status: number; headers?: Record<string, string> };
@@ -109,6 +109,49 @@ describe("getPr", () => {
     }).getPr(7);
     const states = Object.fromEntries(detail.reviews.map((r) => [r.reviewer, r.state]));
     expect(states).toEqual({ lee: "APPROVED", sam: "CHANGES_REQUESTED" });
+  });
+
+  it("records which commit each review was made on, so stale approvals can be detected", async () => {
+    const detail = await client({
+      ...base,
+      "/pulls/7/reviews": [
+        { user: { login: "lee" }, state: "APPROVED", submitted_at: "2026-10-02T09:00:00Z", commit_id: "oldsha" },
+        { user: { login: "sam" }, state: "APPROVED", submitted_at: "2026-10-02T09:00:00Z" },
+      ],
+      "/check-runs": { total_count: 0, check_runs: [] },
+    }).getPr(7);
+    expect(detail.reviews).toEqual([
+      expect.objectContaining({ reviewer: "lee", commitId: "oldsha" }),
+      expect.objectContaining({ reviewer: "sam", commitId: null }),
+    ]);
+  });
+
+  describe("readySince (when the PR became ready for review)", () => {
+    const withEvents = (events: Route) => client({ ...base, "/issues/7/events": events, "/check-runs": { total_count: 0, check_runs: [] } });
+
+    it("uses the latest ready_for_review event, because a PR can start as a draft", async () => {
+      const detail = await withEvents([
+        { event: "labeled", created_at: "2026-10-02T08:00:00Z" },
+        { event: "ready_for_review", created_at: "2026-10-05T08:00:00Z" },
+        { event: "convert_to_draft", created_at: "2026-10-06T08:00:00Z" },
+        { event: "ready_for_review", created_at: "2026-10-09T08:00:00Z" },
+      ]).getPr(7);
+      expect(detail.readySince).toBe("2026-10-09T08:00:00Z");
+    });
+
+    it("is the creation time when it was never a draft", async () => {
+      const detail = await withEvents([{ event: "labeled", created_at: "2026-10-02T08:00:00Z" }]).getPr(7);
+      expect(detail.readySince).toBe("2026-10-01T10:00:00Z");
+    });
+
+    it("is unknown (null), not guessed, when the events cannot be read", async () => {
+      expect((await withEvents({ status: 403 }).getPr(7)).readySince).toBeNull();
+    });
+
+    it("is unknown when there are too many events to see them all", async () => {
+      const many = Array.from({ length: 100 }, () => ({ event: "labeled", created_at: "2026-10-02T08:00:00Z" }));
+      expect((await withEvents(many).getPr(7)).readySince).toBeNull();
+    });
   });
 
   it("reports CI as unknown (null), not passing, when the checks API is unavailable", async () => {

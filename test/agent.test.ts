@@ -15,6 +15,7 @@ const detail = (n: number): PrDetail => ({
   author: "dana",
   draft: false,
   createdAt: "2026-10-19T12:00:00Z",
+  readySince: "2026-10-19T12:00:00Z",
   updatedAt: "2026-10-20T10:00:00Z",
   labels: [],
   requestedReviewers: [],

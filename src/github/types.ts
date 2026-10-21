@@ -30,6 +30,8 @@ export interface ReviewSummary {
   /** APPROVED | CHANGES_REQUESTED | COMMENTED | DISMISSED | PENDING */
   state: string;
   submittedAt: string | null;
+  /** The commit this review was made on. Null when GitHub did not say. An approval of an older commit is stale. */
+  commitId: string | null;
 }
 
 export interface CommentSummary {
@@ -45,6 +47,8 @@ export interface PrDetail extends PrSummary {
   additions: number;
   deletions: number;
   changedFiles: number;
+  /** When the PR last became ready for review (it can start as a draft). Null = could not be determined. */
+  readySince: string | null;
   /** GitHub's merge state: clean | blocked | behind | dirty | unstable | unknown ... */
   mergeableState: string | null;
   checks: CheckSummary | null;

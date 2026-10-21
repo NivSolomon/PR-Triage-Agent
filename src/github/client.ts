@@ -78,8 +78,11 @@ const rawReviews = z.array(
     user,
     state: z.string(),
     submitted_at: z.string().nullable().optional(),
+    commit_id: z.string().nullable().optional(),
   }),
 );
+
+const rawIssueEvents = z.array(z.object({ event: z.string(), created_at: z.string() }));
 
 const rawComments = z.array(
   z.object({
@@ -144,10 +147,11 @@ export class GitHubClient {
 
     // Independent lookups run in parallel. CI data is allowed to be unavailable (-> null,
     // reported as "unknown"); reviews and comments failing is a real error and propagates.
-    const [checks, reviews, comments] = await Promise.all([
+    const [checks, reviews, comments, readySince] = await Promise.all([
       this.getChecks(pr.head.sha),
       this.getReviews(number),
       this.getComments(number),
+      this.getReadySince(number, pr.created_at),
     ]);
 
     return {
@@ -156,6 +160,7 @@ export class GitHubClient {
       additions: pr.additions,
       deletions: pr.deletions,
       changedFiles: pr.changed_files,
+      readySince,
       mergeableState: pr.mergeable_state ?? null,
       checks,
       reviews,
@@ -237,6 +242,22 @@ export class GitHubClient {
     }
   }
 
+  /**
+   * When the PR last became ready for review. A PR that was a draft for two weeks has not "been waiting"
+   * for two weeks. No ready_for_review event means it was opened ready. Null (unknown) if the events
+   * cannot be read or are too many to see them all, so the caller can say so instead of guessing.
+   */
+  private async getReadySince(number: number, createdAt: string): Promise<string | null> {
+    try {
+      const events = rawIssueEvents.parse(await this.get(`/issues/${number}/events?per_page=100`));
+      if (events.length >= 100) return null;
+      const ready = events.filter((e) => e.event === "ready_for_review").map((e) => e.created_at).sort();
+      return ready.length > 0 ? (ready[ready.length - 1] as string) : createdAt;
+    } catch {
+      return null;
+    }
+  }
+
   private async getReviews(number: number): Promise<ReviewSummary[]> {
     const raw = rawReviews.parse(await this.get(`/pulls/${number}/reviews?per_page=100`));
     // Keep the latest meaningful state per reviewer. Plain comments don't override an approval.
@@ -248,6 +269,7 @@ export class GitHubClient {
         reviewer,
         state: r.state,
         submittedAt: r.submitted_at ?? null,
+        commitId: r.commit_id ?? null,
       });
     }
     return [...latest.values()];

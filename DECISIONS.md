@@ -19,6 +19,7 @@ A dashboard can list; it cannot explain, and it cannot draft a comment that a hu
 - One repository per deployment, configured by `GITHUB_REPO`.
 - Slack is the chat channel (a `/triage` command, direct messages and @mentions); a small web page shows the same queue and pending approvals. The first version used Telegram and was verified live; it was replaced by Slack because that is what an engineering team actually uses at work (see "Changing the channel" below).
 - Approvers are a fixed allowlist of Slack member ids.
+- **Who may chat is a different question from who may approve.** Testers have to be able to talk to the agent without me collecting their Slack ids first, so `SLACK_ALLOW_ALL_MEMBERS=true` lets any member of the workspace chat; the workspace invite is then the gate. Approving stays a fixed list that this setting cannot widen. It is off by default, a typo in the value stops startup, and it is only for a workspace I control (invite-only, no guests, no Slack Connect channels, because the bot cannot tell a guest from a member without the extra `users:read` permission I chose not to request). A wider chat audience is held in check by the per-person daily cap and the monthly budget guard, which apply to everyone.
 
 ## 3. Stack and why
 
@@ -39,7 +40,7 @@ A dashboard can list; it cannot explain, and it cannot draft a comment that a hu
 
 | 3 | GitHub write methods; SQLite store; approval service | **No approval, no action** is enforced in one place (`ApprovalService`), not in the prompt. The model can only *propose*, which writes a pending row and never calls GitHub. Approving atomically moves `pending -> executing` (`UPDATE ... WHERE status='pending' AND expires_at > now`), so double taps or two approvers cannot post twice. The text posted is read from the stored row, so it is exactly what the approver saw. Approval rights are a fixed allowlist, separate from "who may chat". Proposals expire after 24h and at most 20 can wait at once (flood protection). |
 
-| 4 | Deterministic triage engine (`src/triage`) | **Reasoning is computed, then explained.** Each PR is assessed from named signals (CI, review state, conflicts, age, size) with a weight and the fact it rests on. The model's job later is to explain this output, not to invent a ranking, so the same input gives the same order and the logic is unit-tested. Blocked PRs (red CI, changes requested, conflicts) rank *below* reviewable ones: reviewing them now is wasted effort. Confidence drops when inputs are missing (CI fetch failed = low, CI running or no checks = medium) and the gaps are listed in `unknowns`. The engine never says "flaky": we have no run history, so that would be a guess. One PR failing to load is reported, never silently dropped. |
+| 4 | Deterministic triage engine (`src/triage`) | **Reasoning is computed, then explained.** Each PR is assessed from named signals (CI, review state, conflicts, age, size) with a weight and the fact it rests on. The model's job later is to explain this output, not to invent a ranking, so the same input gives the same order and the logic is unit-tested. Blocked PRs (red CI, changes requested, conflicts) rank *below* reviewable ones: reviewing them now is wasted effort. Confidence drops when inputs are missing (CI fetch failed = low, CI running or no checks = medium) and the gaps are listed in `unknowns`. The engine never says "flaky": we have no run history, so that would be a guess. One PR failing to load is reported, never silently dropped. The scoring was reviewed and tightened later; see "Scoring: what was wrong and what changed" below. |
 
 | 5 | Budget guard and usage log (`src/budget`) | **It never goes over silently.** Every model call is stored with tokens and cost. Three modes (normal / economy / blocked) are decided from real recorded spend, hosting is subtracted first, and a small reserve means one in-flight request cannot push the month over. Each threshold alerts the team once, not on every request. Blocked mode still serves the ranked queue because that needs no model. See section 6 for the numbers. |
 
@@ -95,6 +96,29 @@ Run twice on the real model: 12/12 both times. That is two samples, not a guaran
 
 **What the evals caught on their first run (11/12):** eval 4 failed. The answer was correct but named PRs by title only, with Markdown that Slack would show as raw asterisks. Looking at the full answer showed a second, worse problem: **#106 was silently missing**, because the model had chosen `limit: 5` itself and then did not mention that more PRs existed. Fixes: the model no longer controls `limit` (the system decides and the tool reports `moreOpenPrsNotShown`); the prompt requires "#number title + link", and naming what was left out; and Markdown is stripped in code (`toPlainText`) because small models do not reliably obey formatting rules. All 12 passed after that.
 
+### Scoring: what was wrong and what changed
+
+I re-read the scoring against what a reviewer would actually trust, and found real problems. This is the current design and the reasons.
+
+**Problems found in the first version**
+1. **"Ready to merge" could be false.** It meant "one approval and green CI". It ignored GitHub's own merge state (so a repo requiring two approvals still showed "ready") and ignored that an approval is for a specific commit (new commits make it stale). It still reported high confidence. That could tell a team to merge something it should not.
+2. **The score contradicted the order.** The queue sorted by state first and score second, so a PR with score 87 was listed under one with score 75. The score looked broken.
+3. **False precision and double counting.** Failing CI was counted twice (once in the state, once as -30), `no approval` *added* points, and stale PRs got a bonus and a penalty for the same situation. All of the weights were judgment, shown as if measured.
+4. **The wait clock started at creation.** A PR that sat as a draft for two weeks and was just marked ready looked "overdue".
+
+**What it does now (`src/triage/analyze.ts`)**
+- `score = 50 + a band for the state + small in-band adjustments`. The bands are 20 apart (review +40, merge +20, unclear 0, blocked -20, draft -40) and the adjustments are capped at +/-9, so **the score alone decides the order**. A test tries every combination of the inputs and proves a lower band can never outscore a higher one. The state band is itself a signal, so the web page's waterfall still adds up from 50.
+- Inside a band the only things that move a PR are: how long it has waited (fairness, max +3), small size (+2) or large (-2), green CI (+1) or pending CI (-2), an explicit review request (+1), and a stale approval (+2, it needs a fresh look). Each value is in `WEIGHTS` with its reason. Facts that should not change the order (has approvals, no approvals, stale) have weight 0 and are shown only as facts.
+- **Ready to merge** now requires: an approval on the *current* commit, green or no CI, and GitHub reporting the merge state as `clean`. Approved-but-blocked, approved-but-behind and approved-but-not-yet-computed are `needs_review` with a specific recommendation. An approval of an older commit is listed as a stale approval and does not count.
+- **Wait time** starts when the PR last became ready for review (from the issue events), not when it was opened. If GitHub's events cannot be read, the wait is counted from creation and the answer says so and drops to medium confidence.
+- **Confidence means how complete the data was**, not how sure the order is. The queue text and the model prompt now say so.
+
+**Known limits (not fixed, on purpose)**
+- **The weights are still judgment calls.** Nobody has measured them on a real team. They are small and capped so a wrong guess cannot flip a state, but I cannot claim they are optimal. With real usage the right move is to log which PR people actually reviewed first and compare.
+- **The queue is for the whole team, not for you.** A good review queue puts "PRs where *I* am the requested reviewer" first. That needs a Slack-user to GitHub-login mapping that does not exist yet.
+- **Any failing check counts as a blocker, even one that is not required.** Telling them apart needs the branch-protection API, which needs admin permission I do not want to ask this token for.
+- **Size counts every changed line**, including lock files and generated code, because per-file data costs one more GitHub call per PR. A dependency bump can look bigger than it is.
+- **More than 100 events on a PR** means the ready time is reported as unknown rather than guessed.
 ### Failure halfway through an approved action (design, step 3)
 
 Each posted comment carries a hidden marker `<!-- pr-triage-agent:<id> -->`.
@@ -193,5 +217,5 @@ What I would add and have not built: a "this was wrong" button that stores the q
 **3. Which part am I least confident in, and why?**
 
 1. **The Slack integration in a real workspace.** The channel logic is covered by tests with a fake Slack API, and the GitHub path was exercised live, but the Slack app (scopes, Socket Mode, the button payloads) has not been run end to end yet. This is where a surprise (a missing scope, the DM to approvers not opening, interactivity not enabled) is most likely.
-2. **The scoring weights.** Numbers like "+10 for small, -30 for failing CI" are my judgement. They give sensible orderings on the fixture, but I have not validated them on a real team's PRs. They live in one file with tests (`src/triage/analyze.ts`) so they are easy to tune, but I am not yet sure they match how this team actually prioritises.
+2. **The scoring weights.** The in-band numbers (for example +2 for a small change) are my judgement. They give sensible orderings on the fixture, but I have not validated them on a real team's PRs. They live in one file with tests (`src/triage/analyze.ts`) so they are easy to tune, but I am not yet sure they match how this team actually prioritises.
 3. **The evals are checks on keywords.** They look for facts and behaviour, not exact wording, and I ran them twice on one model. That is a sanity check, not a measurement of reliability.

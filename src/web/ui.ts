@@ -435,7 +435,8 @@ export const APP_JS = `
   var SIGNAL_ICON = {
     draft: "draft", ci_failing: "ci", ci_green: "ci", ci_pending: "clock", changes_requested: "user", conflicts: "merge",
     behind: "merge", approved: "check", no_approval: "user", long_wait: "clock", stale: "clock", small: "layers",
-    large: "layers", review_requested: "eye"
+    large: "layers", review_requested: "eye", stale_approval: "check", merge_blocked: "merge",
+    state_review: "eye", state_merge: "check", state_unclear: "help", state_blocked: "clock"
   };
   var STATE_ORDER = ["needs_review", "ready_to_merge", "unclear", "waiting_on_author", "draft"];
   var SUGGESTIONS = ["What should we review first?", "Which PRs are blocked and why?", "What is ready to merge?", "Which PRs have gone stale?"];
@@ -797,7 +798,7 @@ export const APP_JS = `
 
     var ring = el("div", "ring " + scoreTone(it.score));
     ring.style.setProperty("--p", String(it.score));
-    ring.title = "Review priority " + it.score + " of 100. Only comparable between PRs in this list.";
+    ring.title = "Review priority " + it.score + " of 100. Higher is reviewed sooner; the queue is sorted by it.";
     ring.appendChild(el("b", "", String(it.score)));
     head.appendChild(ring);
     card.appendChild(head);

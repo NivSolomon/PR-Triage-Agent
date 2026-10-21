@@ -6,6 +6,14 @@ import type { PrDetail } from "../github/types.js";
  * Why not let the model rank? A ranking built from named, checkable signals can be tested,
  * cited and explained; the model's job is to explain it in plain language, not to invent it.
  * Every signal carries the evidence it came from, and the confidence drops when data is missing.
+ *
+ * HOW THE SCORE WORKS (0-100, higher = review sooner)
+ *   score = 50 + a band for the PR's state + small adjustments inside that band.
+ *   The bands are 20 apart and the adjustments are capped at +/-9, so the score alone decides the order:
+ *   a blocked PR can never outrank one a reviewer can act on, however small or old it is.
+ *   The numbers inside a band are judgment calls (nobody has measured them on a real team); each one is
+ *   listed in WEIGHTS with its reason, and tests prove the bands cannot overlap.
+ *   "Confidence" is NOT how sure we are the order is right. It is how complete the data behind it was.
  */
 
 export type TriageState =
@@ -22,7 +30,7 @@ export interface Signal {
   code: string;
   /** Plain-language fact, phrased so it is true by construction (no guessing). */
   text: string;
-  /** Effect on the review priority score. */
+  /** Effect on the review priority score (0 = a fact that does not change the order). */
   weight: number;
 }
 
@@ -32,7 +40,7 @@ export interface TriageAssessment {
   author: string;
   sourceUrl: string;
   state: TriageState;
-  /** Higher = review sooner. Only comparable between PRs in the same run. */
+  /** Higher = review sooner. The queue is sorted by this. */
   score: number;
   confidence: Confidence;
   signals: Signal[];
@@ -47,12 +55,57 @@ const HOUR = 3_600_000;
 export const THRESHOLDS = {
   /** Lines changed (additions + deletions) at or below which a PR is "small". */
   smallLines: 150,
-  /** Lines changed above which a PR is "large". */
+  /** Lines changed at or above which a PR is "large". Review quality falls as a change grows, so both are judgment calls. */
   largeLines: 800,
   /** Hours without any update after which a PR counts as stale. */
   staleHours: 24 * 7,
-  /** Hours a PR has waited before the wait itself becomes a reason to act. */
+  /** Hours a PR has waited for review before the wait itself becomes a reason to act. */
   longWaitHours: 48,
+} as const;
+
+/**
+ * Where each state sits on the 0-100 scale (added to a base of 50). 20 apart, so the +/-9 adjustments
+ * below can never carry a PR into the next band.
+ */
+export const BANDS: Record<TriageState, { offset: number; code: string; text: string }> = {
+  needs_review: { offset: 40, code: "state_review", text: "Reviewers can act on it now." },
+  ready_to_merge: {
+    offset: 20,
+    code: "state_merge",
+    text: "Approved and mergeable: no review work left, so it ranks after PRs that still need a review.",
+  },
+  unclear: { offset: 0, code: "state_unclear", text: "Its CI status is unknown, so it cannot be ranked with confidence." },
+  waiting_on_author: {
+    offset: -20,
+    code: "state_blocked",
+    text: "Blocked on the author, so reviewing it now would be wasted effort.",
+  },
+  draft: { offset: -40, code: "draft", text: "It is marked as a draft." },
+};
+
+/**
+ * Adjustments inside a band. Every value is a judgment call, kept small on purpose (see the header).
+ * Largest possible total for a PR that can be reviewed: wait 3 + small 2 + green 1 + requested 1 + stale approval 2 = 9.
+ * Largest possible penalty for a blocked PR: 3 blockers x 2 + large 2 + behind 1 = 9.
+ */
+export const WEIGHTS = {
+  /** Fairness: nothing should wait forever. 1 point at 2 days, +1 per further 2 days, at most 3. */
+  waitMax: 3,
+  /** Small changes get reviewed faster and more carefully, and free the author sooner. */
+  small: 2,
+  large: -2,
+  /** Green CI over "no checks": the reviewer can trust the build. */
+  ciGreen: 1,
+  /** Still running: better to wait for the result than to review twice. */
+  ciPending: -2,
+  /** Someone was explicitly asked. */
+  reviewRequested: 1,
+  /** Approved, then new commits arrived: the approval no longer covers the code. It needs a fresh look. */
+  staleApproval: 2,
+  /** Needs a rebase before it can merge. */
+  behind: -1,
+  /** Within the blocked band: fewer blockers first. */
+  blocker: -2,
 } as const;
 
 function hoursBetween(fromIso: string, now: Date): number {
@@ -65,6 +118,8 @@ function describeAge(hours: number): string {
   return `${Math.round(hours / 24)} days`;
 }
 
+type CiState = "green" | "red" | "pending" | "unknown" | "none";
+
 export function assessPr(pr: PrDetail, now: Date = new Date()): TriageAssessment {
   const signals: Signal[] = [];
   const unknowns: string[] = [];
@@ -73,14 +128,23 @@ export function assessPr(pr: PrDetail, now: Date = new Date()): TriageAssessment
   };
 
   const lines = pr.additions + pr.deletions;
-  const waitingHours = hoursBetween(pr.createdAt, now);
   const idleHours = hoursBetween(pr.updatedAt, now);
 
+  // The wait clock starts when the PR became ready for review, not when it was opened as a draft.
+  const waitStart = pr.readySince ?? pr.createdAt;
+  const waitingHours = hoursBetween(waitStart, now);
+  if (pr.readySince === null && !pr.draft) {
+    unknowns.push("Could not tell when it was marked ready for review, so the wait is counted from when it was opened.");
+  }
+
+  // An approval only counts for the code that was reviewed. A newer commit makes it stale.
   const approvals = pr.reviews.filter((r) => r.state === "APPROVED");
+  const currentApprovals = approvals.filter((r) => r.commitId === null || r.commitId === pr.headSha);
+  const staleApprovals = approvals.filter((r) => r.commitId !== null && r.commitId !== pr.headSha);
   const changesRequested = pr.reviews.filter((r) => r.state === "CHANGES_REQUESTED");
 
   // --- CI: unknown is never treated as passing ---
-  let ciState: "green" | "red" | "pending" | "unknown" | "none";
+  let ciState: CiState;
   if (pr.checks === null) {
     ciState = "unknown";
     unknowns.push("CI status could not be fetched, so it is not counted as passing.");
@@ -97,73 +161,96 @@ export function assessPr(pr: PrDetail, now: Date = new Date()): TriageAssessment
 
   // --- merge state ---
   const conflicts = pr.mergeableState === "dirty";
+  const mergeable = pr.mergeableState === "clean" || pr.mergeableState === "has_hooks";
   if (pr.mergeableState === null || pr.mergeableState === "unknown") {
     unknowns.push("GitHub has not computed the merge state (conflicts) yet.");
   }
 
   // --- state decision ---
+  const blocked = changesRequested.length > 0 || conflicts || ciState === "red";
   let state: TriageState;
   if (pr.draft) state = "draft";
-  else if (changesRequested.length > 0 || conflicts || ciState === "red") state = "waiting_on_author";
-  else if (approvals.length > 0 && (ciState === "green" || ciState === "none")) state = "ready_to_merge";
+  else if (blocked) state = "waiting_on_author";
+  // "Ready to merge" is a strong claim: approval of THIS code, green (or no) CI, and GitHub itself says it can merge.
+  else if (currentApprovals.length > 0 && (ciState === "green" || ciState === "none") && mergeable) state = "ready_to_merge";
   else if (ciState === "unknown") state = "unclear";
   else state = "needs_review";
 
-  // --- signals and score ---
-  let score = 50;
-
-  if (pr.draft) add("draft", "It is marked as a draft.", -40);
-
+  // --- facts and in-band adjustments ---
   if (ciState === "red") {
-    add("ci_failing", `CI is failing: ${pr.checks?.failing.join(", ")}.`, -30);
+    add("ci_failing", `CI is failing: ${pr.checks?.failing.join(", ")}.`, WEIGHTS.blocker);
   } else if (ciState === "green") {
-    add("ci_green", `All ${pr.checks?.total} CI checks passed.`, 10);
+    add("ci_green", `All ${pr.checks?.total} CI checks passed.`, WEIGHTS.ciGreen);
   } else if (ciState === "pending") {
-    add("ci_pending", `CI is still running: ${pr.checks?.pending.join(", ")}.`, -5);
+    add("ci_pending", `CI is still running: ${pr.checks?.pending.join(", ")}.`, WEIGHTS.ciPending);
   }
 
   if (changesRequested.length > 0) {
     add(
       "changes_requested",
       `${changesRequested.map((r) => r.reviewer).join(", ")} requested changes; the next move is the author's.`,
-      -25,
+      WEIGHTS.blocker,
     );
   }
-  if (conflicts) add("conflicts", "It has merge conflicts with the base branch.", -20);
-  if (pr.mergeableState === "behind") add("behind", "The branch is behind its base branch.", -3);
+  if (conflicts) add("conflicts", "It has merge conflicts with the base branch.", WEIGHTS.blocker);
+  if (pr.mergeableState === "behind") add("behind", "The branch is behind its base branch.", WEIGHTS.behind);
 
-  if (approvals.length > 0) {
-    add("approved", `Approved by ${approvals.map((r) => r.reviewer).join(", ")}.`, 8);
+  if (currentApprovals.length > 0) {
+    add("approved", `Approved by ${currentApprovals.map((r) => r.reviewer).join(", ")}.`, 0);
+    if (state === "needs_review" && pr.mergeableState === "blocked") {
+      add(
+        "merge_blocked",
+        "GitHub reports it cannot be merged yet (often another required approval or check is missing).",
+        0,
+      );
+    }
   } else if (!pr.draft) {
-    add("no_approval", "It has no approvals yet.", 5);
+    add("no_approval", "It has no approvals yet.", 0);
+  }
+  if (staleApprovals.length > 0 && !pr.draft) {
+    add(
+      "stale_approval",
+      `${staleApprovals.map((r) => r.reviewer).join(", ")} approved an earlier version; new commits were pushed since, so it needs a fresh look.`,
+      WEIGHTS.staleApproval,
+    );
   }
 
   if (!pr.draft) {
     if (waitingHours >= THRESHOLDS.longWaitHours) {
-      const bonus = Math.min(20, Math.floor((waitingHours - THRESHOLDS.longWaitHours) / 12) + 8);
-      add("long_wait", `It has been open for ${describeAge(waitingHours)}.`, bonus);
+      const bonus = Math.min(WEIGHTS.waitMax, 1 + Math.floor((waitingHours - THRESHOLDS.longWaitHours) / 48));
+      add("long_wait", `It has been waiting for review for ${describeAge(waitingHours)}.`, bonus);
     }
+    // Idle for a long time is a prompt to decide, not a reason to rank it lower or higher.
     if (idleHours >= THRESHOLDS.staleHours) {
-      add("stale", `No activity for ${describeAge(idleHours)}; it may need a decision to close or revive it.`, -10);
+      add("stale", `No activity for ${describeAge(idleHours)}; it may need a decision to close or revive it.`, 0);
     }
   }
 
   if (lines <= THRESHOLDS.smallLines) {
-    add("small", `Small change: ${lines} lines in ${pr.changedFiles} file(s), quick to review.`, 10);
+    add("small", `Small change: ${lines} lines in ${pr.changedFiles} file(s), quick to review.`, WEIGHTS.small);
   } else if (lines >= THRESHOLDS.largeLines) {
-    add("large", `Large change: ${lines} lines in ${pr.changedFiles} file(s); plan a longer review.`, -8);
+    add("large", `Large change: ${lines} lines in ${pr.changedFiles} file(s); plan a longer review.`, WEIGHTS.large);
   }
 
   if (pr.requestedReviewers.length > 0 && !pr.draft) {
-    add("review_requested", `Review requested from ${pr.requestedReviewers.join(", ")}.`, 6);
+    add("review_requested", `Review requested from ${pr.requestedReviewers.join(", ")}.`, WEIGHTS.reviewRequested);
   }
 
-  score += signals.reduce((sum, s) => sum + s.weight, 0);
-  score = Math.max(0, Math.min(100, Math.round(score)));
+  // The state band goes last so the first few facts shown in chat are real facts, not the band.
+  const band = BANDS[state];
+  add(band.code, band.text, band.offset);
+
+  const score = Math.max(0, Math.min(100, Math.round(50 + signals.reduce((sum, s) => sum + s.weight, 0))));
 
   // --- confidence: lower whenever an input to the decision is missing ---
   let confidence: Confidence = "high";
-  if (ciState === "pending" || ciState === "none" || pr.mergeableState === null || pr.mergeableState === "unknown") {
+  if (
+    ciState === "pending" ||
+    ciState === "none" ||
+    pr.mergeableState === null ||
+    pr.mergeableState === "unknown" ||
+    (pr.readySince === null && !pr.draft)
+  ) {
     confidence = "medium";
   }
   if (ciState === "unknown") confidence = "low";
@@ -178,33 +265,54 @@ export function assessPr(pr: PrDetail, now: Date = new Date()): TriageAssessment
     confidence,
     signals,
     unknowns,
-    recommendation: recommend(state, pr, ciState, approvals.length),
+    recommendation: recommend({
+      state,
+      author: pr.author,
+      ci: ciState,
+      approvals: currentApprovals.length,
+      mergeableState: pr.mergeableState,
+      staleDays: idleHours >= THRESHOLDS.staleHours ? Math.round(idleHours / 24) : 0,
+    }),
   };
 }
 
-function recommend(
-  state: TriageState,
-  pr: PrDetail,
-  ci: "green" | "red" | "pending" | "unknown" | "none",
-  approvals: number,
-): string {
-  switch (state) {
+function recommend(x: {
+  state: TriageState;
+  author: string;
+  ci: CiState;
+  approvals: number;
+  mergeableState: string | null;
+  staleDays: number;
+}): string {
+  switch (x.state) {
     case "draft":
       return "Skip for now; the author has not asked for review.";
     case "waiting_on_author":
-      return `Do not review yet. Ask ${pr.author} to address the blocker (failing CI, requested changes or conflicts) first.`;
+      return `Do not review yet. Ask ${x.author} to address the blocker (failing CI, requested changes or conflicts) first.`;
     case "ready_to_merge":
-      return `Ready to merge: ${approvals} approval(s) and no blockers found.`;
-    case "needs_review":
-      return ci === "pending"
-        ? "Reviewable now; CI is still running, so re-check before approving."
-        : "Review this next: nothing blocks the reviewer.";
+      return `Ready to merge: ${x.approvals} approval(s) on the current code, CI is fine and GitHub reports it mergeable.`;
     case "unclear":
       return "Check CI manually before reviewing; its status could not be fetched.";
+    case "needs_review": {
+      if (x.approvals > 0) {
+        if (x.mergeableState === "blocked") {
+          return "Approved, but GitHub says it cannot be merged yet (often a missing required approval or check). Check the branch protection rules.";
+        }
+        if (x.mergeableState === "behind") return "Approved, but the branch is behind its base. Ask the author to update it, then merge.";
+        if (x.ci === "pending") return "Approved; wait for CI to finish before merging.";
+        return "Approved, but GitHub has not confirmed it can be merged yet. Check again shortly.";
+      }
+      const stale = x.staleDays > 0 ? ` It has had no activity for ${x.staleDays} days; check it is still wanted.` : "";
+      return (
+        (x.ci === "pending"
+          ? "Reviewable now; CI is still running, so re-check before approving."
+          : "Review this next: nothing blocks the reviewer.") + stale
+      );
+    }
   }
 }
 
-/** Order for the review queue: reviewable PRs first, then by score. */
+/** Queue order. The score already separates the states; the state is a second guard so a future weight change cannot let a blocked PR jump the queue. */
 export function rankAssessments(list: TriageAssessment[]): TriageAssessment[] {
   const order: Record<TriageState, number> = {
     needs_review: 0,

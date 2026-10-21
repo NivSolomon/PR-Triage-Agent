@@ -35,6 +35,7 @@ export function renderQueue(q: QueueResult): string {
     lines.push(``);
   }
   if (q.truncated) lines.push(`More open PRs exist than shown; only the most recently updated were analysed.`);
+  if (q.items.length > 0) lines.push(`Score: higher means review sooner. Confidence: how complete the GitHub data was, not a prediction.`);
   return lines.join("\n").trim();
 }
 
