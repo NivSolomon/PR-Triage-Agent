@@ -89,6 +89,10 @@ describe("slackSafe", () => {
   });
 });
 
+const textOf = (blocks: unknown[]): string[] =>
+  (blocks as Array<{ type: string; text?: { text: string } }>).filter((b) => b.type === "section").map((b) => b.text?.text ?? "");
+const unescape = (s: string): string => s.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
+
 describe("approvalBlocks", () => {
   it("offers Approve (with a confirmation) and Reject, both carrying only the request id", () => {
     const blocks = approvalBlocks(record());
@@ -98,28 +102,52 @@ describe("approvalBlocks", () => {
     expect(actions.elements[0]).toHaveProperty("confirm");
   });
 
-  it("shows the exact comment as plain_text, which Slack never parses for mentions", () => {
-    const blocks = approvalBlocks(record({ body: "<!channel> deploy now" }));
-    const sections = blocks.filter((b) => b.type === "section") as Array<{ text: { type: string; text: string } }>;
-    expect(sections.every((s) => s.text.type === "plain_text")).toBe(true);
-    expect(sections.map((s) => s.text.text).join("\n")).toContain("> <!channel> deploy now");
+  it("shows the facts on separate lines and the exact comment in a code block", () => {
+    const sections = textOf(approvalBlocks(record({ body: "Line one\nLine two" })));
+    const all = sections.join("\n");
+    expect(all).toContain("*Action:* post ONE public comment on pull request #7");
+    expect(all).toContain("```Line one\nLine two```");
+    expect(all).toMatch(/\*Requested by\* slack:U0ASKER via slack/);
   });
 
-  it("never cuts a long comment: the approver must see all of it", () => {
-    const body = Array.from({ length: 40 }, (_, i) => `line ${i} ${"y".repeat(45)}`).join("\n").slice(0, 2000);
-    const sections = approvalBlocks(record({ body })).filter((b) => b.type === "section") as Array<{ text: { text: string } }>;
-    expect(sections.every((s) => s.text.text.length <= 3000)).toBe(true);
-    const shown = sections.map((s) => s.text.text).join("\n");
-    for (const line of body.split("\n")) expect(shown).toContain(`> ${line}`);
+  it("defuses a hostile comment and title: no live mention, broadcast or link survives", () => {
+    const sections = textOf(
+      approvalBlocks(record({ body: "<!channel> <https://evil.example|Click> <@U123>", prTitle: "<!here> urgent" })),
+    );
+    const all = sections.join("\n");
+    expect(all).not.toMatch(/<!|<@|<https?:/);
+    expect(all).toContain("&lt;!channel&gt;");
+    expect(all).toContain("&lt;!here&gt; urgent");
   });
 
-  it("replaces the buttons with the outcome after a decision", () => {
-    const blocks = decidedBlocks("card text", "Posted the comment");
+  it("cannot be broken out of its code block by backticks in the comment", () => {
+    const sections = textOf(approvalBlocks(record({ body: "before ``` after" })));
+    const body = sections.find((s) => s.includes("Exact comment text"))!;
+    const inner = body.slice(body.indexOf("```") + 3, body.lastIndexOf("```"));
+    expect(inner).not.toContain("```");
+    expect(inner.replace(/\u200b/g, "")).toBe("before ``` after");
+  });
+
+  it("never cuts a long comment, even when escaping makes it much longer", () => {
+    const body = Array.from({ length: 60 }, (_, i) => `line ${i} <&> ${"y".repeat(40)}`).join("\n") + "\n" + "&".repeat(1500);
+    const trimmed = body.slice(0, 2000);
+    const sections = textOf(approvalBlocks(record({ body: trimmed })));
+    expect(sections.every((s) => s.length <= 3000)).toBe(true);
+    const shown = sections
+      .filter((s) => s.startsWith("*Exact comment text:*") || s.startsWith("*...continued:*"))
+      .map((s) => unescape(s.slice(s.indexOf("```") + 3, s.lastIndexOf("```"))))
+      .join("\n");
+    expect(shown.replace(/\n/g, "")).toBe(trimmed.replace(/\n/g, ""));
+  });
+
+  it("keeps the card and replaces the buttons with the outcome after a decision", () => {
+    const card = approvalBlocks(record());
+    const blocks = decidedBlocks(card, "Posted the comment");
     expect(blocks.some((b) => b.type === "actions")).toBe(false);
-    expect(JSON.stringify(blocks)).toContain("=> Posted the comment");
+    expect(textOf(blocks).join("\n")).toContain("*Exact comment text:*");
+    expect(JSON.stringify(blocks)).toContain("Posted the comment");
   });
 });
-
 describe("/triage commands", () => {
   const run = async (s: ReturnType<typeof setup>, userId: string, text: string) => {
     const replies: string[] = [];
@@ -267,8 +295,7 @@ describe("button clicks", () => {
       userId,
       kind,
       id: record().id,
-      cardText: "the card",
-      finish: async (_card, outcome) => void finished.push(outcome),
+      finish: async (outcome) => void finished.push(outcome),
       notice: async (t) => void notices.push(t),
     });
     return { finished, notices };
@@ -314,7 +341,6 @@ describe("button clicks", () => {
       userId: "U0BOSS",
       kind: "approve",
       id: record().id,
-      cardText: "c",
       finish: async () => { throw new Error("message_not_found"); },
       notice: async (t) => void notices.push(t),
     });

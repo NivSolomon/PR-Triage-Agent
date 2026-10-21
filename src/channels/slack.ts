@@ -73,18 +73,72 @@ export class BoltSlackApi implements SlackApi {
   }
 }
 
+/** Slack ends a code block at three backticks, so a comment containing them is shown with invisible spacers. */
+const ZWSP = "\u200b";
+const neutralizeFences = (s: string): string => s.replace(/```/g, `\`${ZWSP}\`${ZWSP}\``);
+
+/** Split text into pieces whose *escaped* length fits in `limit`, never dropping a character. */
+function escapedChunks(raw: string, limit: number): string[] {
+  const chunks: string[] = [];
+  let current = "";
+  const push = (piece: string): void => {
+    const safe = slackSafe(piece);
+    if (current && current.length + safe.length + 1 > limit) {
+      chunks.push(current);
+      current = "";
+    }
+    current = current ? `${current}\n${safe}` : safe;
+  };
+  for (const line of raw.split("\n")) {
+    if (slackSafe(line).length <= limit) {
+      push(line);
+      continue;
+    }
+    // A single very long line: cut it by characters.
+    let piece = "";
+    for (const ch of line) {
+      if (slackSafe(piece + ch).length > limit) {
+        push(piece);
+        piece = "";
+      }
+      piece += ch;
+    }
+    if (piece) push(piece);
+  }
+  if (current) chunks.push(current);
+  return chunks.length > 0 ? chunks : [""];
+}
+
+const mrkdwn = (text: string): KnownBlock => ({ type: "section", text: { type: "mrkdwn", text } });
+
 /**
- * Block Kit approval card with Approve / Reject buttons. The card shows the exact text that would
- * be posted. Text is `plain_text`, which Slack never parses for mentions or links. Long cards are split
- * across several blocks instead of being cut, so the approver always sees the whole comment.
+ * Block Kit approval card with Approve / Reject buttons. The approver sees the exact text that would be posted,
+ * in a code block, so formatting characters in it show literally and line breaks are kept. Everything that
+ * came from a stranger is escaped first (`<!channel>` becomes harmless text). A long comment is split over
+ * several blocks, never cut, so the approver always sees all of it.
  */
-export function approvalBlocks(record: ActionRecord, cardText: string = renderApprovalCard(record)): KnownBlock[] {
-  const sections: KnownBlock[] = splitMessage(cardText, BLOCK_TEXT_MAX).map((part) => ({
-    type: "section",
-    text: { type: "plain_text", text: part, emoji: false },
-  }));
+export function approvalBlocks(a: ActionRecord): KnownBlock[] {
+  const head = [
+    `*Approval needed* (#${a.id.slice(0, 8)})`,
+    ``,
+    `*Action:* post ONE public comment on pull request #${a.prNumber}`,
+    `*PR:* ${slackSafe(a.prTitle)}`,
+    `*Link:* ${slackSafe(a.prUrl)}`,
+  ].join("\n");
+  const bodyBlocks = escapedChunks(neutralizeFences(a.body), 2600).map((chunk, i) =>
+    mrkdwn(`${i === 0 ? "*Exact comment text:*" : "*...continued:*"}\n\`\`\`${chunk}\`\`\``),
+  );
+  const tail = [
+    `*Why the agent suggests it:* ${slackSafe((a.reason || "(no reason given)").slice(0, 1200))}`,
+    `*Requested by* ${slackSafe(a.requestedBy)} via ${slackSafe(a.requestedVia)}`,
+    `*Expires:* ${slackSafe(a.expiresAt)}`,
+    ``,
+    `_Nothing else will change. Without your approval nothing is posted._`,
+  ].join("\n");
   return [
-    ...sections,
+    mrkdwn(head),
+    ...bodyBlocks,
+    mrkdwn(tail),
     {
       type: "actions",
       block_id: "decision",
@@ -93,7 +147,7 @@ export function approvalBlocks(record: ActionRecord, cardText: string = renderAp
           type: "button",
           action_id: APPROVE_ACTION,
           style: "primary",
-          value: record.id,
+          value: a.id,
           text: { type: "plain_text", text: "Approve and post" },
           confirm: {
             title: { type: "plain_text", text: "Post this comment?" },
@@ -106,7 +160,7 @@ export function approvalBlocks(record: ActionRecord, cardText: string = renderAp
           type: "button",
           action_id: REJECT_ACTION,
           style: "danger",
-          value: record.id,
+          value: a.id,
           text: { type: "plain_text", text: "Reject" },
         },
       ],
@@ -114,14 +168,14 @@ export function approvalBlocks(record: ActionRecord, cardText: string = renderAp
   ];
 }
 
-/** The card after a decision: same text plus the outcome, and no buttons. */
-export function decidedBlocks(cardText: string, outcome: string): KnownBlock[] {
-  return splitMessage(`${cardText}\n\n=> ${outcome}`, BLOCK_TEXT_MAX).map((part) => ({
-    type: "section",
-    text: { type: "plain_text", text: part, emoji: false },
-  }));
+/** The same card after a decision: the buttons are replaced by the outcome. */
+export function decidedBlocks(card: KnownBlock[], outcome: string): KnownBlock[] {
+  return [
+    ...card.filter((b) => b.type !== "actions"),
+    { type: "divider" },
+    { type: "section", text: { type: "plain_text", text: outcome.slice(0, 2900), emoji: false } },
+  ];
 }
-
 /**
  * Turn a Slack API failure into something the person setting this up can act on.
  * Slack's own codes ("missing_scope", "invalid_auth") do not say which of the two tokens is at fault.
@@ -316,15 +370,14 @@ export class SlackChannel {
   }
 
   /**
-   * A click on Approve or Reject. `finish` replaces the card with the outcome (and removes the buttons);
+   * A click on Approve or Reject. `finish` shows the outcome on the card (and removes the buttons);
    * `notice` is a private message to the clicker.
    */
   async handleDecision(p: {
     userId: string;
     kind: DecisionKind;
     id: string;
-    cardText: string;
-    finish: (cardText: string, outcome: string) => Promise<void>;
+    finish: (outcome: string) => Promise<void>;
     notice: (text: string) => Promise<void>;
   }): Promise<void> {
     const actor = slackActor(p.userId);
@@ -333,7 +386,7 @@ export class SlackChannel {
 
     const result = await decide(this.d.approvals, p.kind, p.id, actor);
     try {
-      await p.finish(p.cardText, result.text);
+      await p.finish(result.text);
     } catch {
       await p.notice(result.text);
     }
@@ -482,32 +535,26 @@ export class SlackChannel {
     const onClick = (kind: DecisionKind) =>
       async ({ ack, body, action, respond }: {
         ack: () => Promise<void>;
-        body: { user: { id: string }; message?: { blocks?: Array<{ type?: string; text?: { text?: string } }> } };
+        body: { user: { id: string }; message?: { blocks?: unknown[] } };
         action: { value?: string };
         respond: (m: { replace_original: boolean; text: string; blocks: KnownBlock[] }) => Promise<unknown>;
       }): Promise<void> => {
         await ack();
         const id = action.value;
         if (!id) return;
-        // Recover the card text we rendered, so the outcome is appended to what the approver saw.
-        const cardText =
-          (body.message?.blocks ?? [])
-            .filter((b) => b.type === "section")
-            .map((b) => b.text?.text ?? "")
-            .join("\n") || `Request #${id.slice(0, 8)}`;
+        // Keep the card the approver saw and swap the buttons for the outcome.
+        const card = (body.message?.blocks ?? []) as KnownBlock[];
         await this.handleDecision({
           userId: body.user.id,
           kind,
           id,
-          cardText,
-          finish: async (card, outcome) => {
+          finish: async (outcome) => {
             await respond({
               replace_original: true,
               text: slackSafe(outcome),
               blocks: decidedBlocks(card, outcome),
             });
-          },
-          notice: async (text) => {
+          },          notice: async (text) => {
             await this.requireApi().post(body.user.id, text);
           },
         }).catch((err) => console.error("Slack decision failed:", err instanceof Error ? err.message : err));
