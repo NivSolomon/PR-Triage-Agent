@@ -7,6 +7,8 @@ review comment on a pull request **only after a human approves that exact commen
 Design reasoning, trade-offs, cost estimate, evals and the answers to the understanding questions are in
 [`DECISIONS.md`](DECISIONS.md). The architecture diagram is in [`docs/architecture.pdf`](docs/architecture.pdf).
 
+**Live deployment:** https://pr-triage-agent.fly.dev (Fly.io, Frankfurt, one always-on machine with a persistent volume). First deployed 2026-10-21. Health check: [/healthz](https://pr-triage-agent.fly.dev/healthz). Slack is the main channel; the web page asks for a key (shared with testers separately).
+
 ## What it does
 
 | Requirement | Where |
