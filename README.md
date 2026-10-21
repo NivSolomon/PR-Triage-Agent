@@ -77,6 +77,7 @@ Secrets are **never committed**. Locally they live in `.env` (git-ignored); in p
 | `SLACK_ALLOWED_USER_IDS` | no | Comma-separated Slack member IDs (`U01ABCDEF`) allowed to chat. Empty means only approvers |
 | `SLACK_ALLOW_ALL_MEMBERS` | no | `true` lets every member of the workspace chat (for testers), `false` (default) uses only the list above. Never grants approval rights |
 | `SLACK_APPROVER_USER_IDS` | yes | Comma-separated member IDs allowed to approve (also allowed to chat) |
+| `SLACK_GITHUB_USERS` | no | `U01ABCDEF:octocat,...` links Slack members to GitHub logins, so `/triage queue` and questions like "what should I review?" are personal (review requests for you first, then your own PRs) |
 | `SLACK_DIGEST_CHANNEL_ID` | no | Channel ID (`C01ABCDEF`) for the digest; defaults to a DM to every approver |
 | `WEB_ACCESS_KEY` | for the web page | 16+ chars. Read, chat, ask for a comment |
 | `WEB_APPROVER_KEY` | for web approvals | 16+ chars, different from the access key |

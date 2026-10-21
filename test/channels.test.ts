@@ -15,6 +15,7 @@ const queue = (over: Partial<QueueResult> = {}): QueueResult => ({
       number: 7,
       title: "Fix login",
       author: "dana",
+      requestedReviewers: [],
       sourceUrl: "https://github.com/acme/app/pull/7",
       state: "needs_review",
       score: 80,

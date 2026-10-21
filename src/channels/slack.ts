@@ -224,6 +224,8 @@ export interface SlackDeps {
   allowAllMembers?: boolean;
   /** Slack member ids allowed to approve or reject. */
   approverIds: string[];
+  /** Slack member id -> GitHub login, for the personal queue. Optional. */
+  githubUsers?: Record<string, string>;
   agent: Agent;
   approvals: ApprovalService;
   github: Pick<GitHubClient, "listOpenPrs" | "getPr" | "repo">;
@@ -250,6 +252,18 @@ export class SlackChannel {
   isApprover(actorId: string): boolean {
     return this.approvers.has(actorId.replace(/^slack:/, ""));
   }
+
+  /** The GitHub login linked to this Slack member, if the owner configured one. */
+  private githubLogin(userId: string): string | undefined {
+    return this.d.githubUsers?.[userId];
+  }
+
+  private hasGithubMap(): boolean {
+    return Object.keys(this.d.githubUsers ?? {}).length > 0;
+  }
+
+  private readonly UNLINKED_TIP =
+    "Tip: your Slack account is not linked to a GitHub login, so this list is not personal. Ask the admin to add <your member id>:<your GitHub login> to SLACK_GITHUB_USERS.";
 
   /** May this person talk to the agent? Never implies approval rights (see `isApprover`). */
   private canChat(userId: string): boolean {
@@ -319,7 +333,9 @@ export class SlackChannel {
     if (isCommand && (word === "" || word === "help")) return say(HELP);
     if (isCommand && word === "queue") return this.guarded(p.userId, say, async () => {
       try {
-        await say(renderQueue(await buildQueue(this.d.github)));
+        const login = this.githubLogin(p.userId);
+        const text = renderQueue(await buildQueue(this.d.github), login ? { login } : undefined);
+        await say(login || !this.hasGithubMap() ? text : `${text}\n\n${this.UNLINKED_TIP}`);
       } catch (err) {
         await say(`I couldn't load the queue: ${err instanceof Error ? err.message : "unknown error"}`);
       }
@@ -475,6 +491,7 @@ export class SlackChannel {
         actor,
         via: "slack",
         canPropose: true, // anyone on the access list may *ask*; only approvers can approve
+        githubLogin: this.githubLogin(p.userId),
       });
       await p.say(result.text);
       for (const record of result.proposed) {

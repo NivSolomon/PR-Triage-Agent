@@ -38,6 +38,8 @@ export interface TriageAssessment {
   number: number;
   title: string;
   author: string;
+  /** GitHub logins whose review was requested. Used for the personal view; never changes the score. */
+  requestedReviewers: string[];
   sourceUrl: string;
   state: TriageState;
   /** Higher = review sooner. The queue is sorted by this. */
@@ -248,9 +250,9 @@ export function assessPr(pr: PrDetail, now: Date = new Date()): TriageAssessment
   }
 
   if (lines <= THRESHOLDS.smallLines) {
-    add("small", `Small change: ${lines} lines in ${pr.changedFiles} file(s)${skippedNote}, quick to review.`, WEIGHTS.small);
+    add("small", `Small change: ${lines} ${lines === 1 ? "line" : "lines"} in ${pr.changedFiles} file(s)${skippedNote}, quick to review.`, WEIGHTS.small);
   } else if (lines >= THRESHOLDS.largeLines) {
-    add("large", `Large change: ${lines} lines in ${pr.changedFiles} file(s)${skippedNote}; plan a longer review.`, WEIGHTS.large);
+    add("large", `Large change: ${lines} ${lines === 1 ? "line" : "lines"} in ${pr.changedFiles} file(s)${skippedNote}; plan a longer review.`, WEIGHTS.large);
   }
 
   if (pr.requestedReviewers.length > 0 && !pr.draft) {
@@ -280,6 +282,7 @@ export function assessPr(pr: PrDetail, now: Date = new Date()): TriageAssessment
     number: pr.number,
     title: pr.title,
     author: pr.author,
+    requestedReviewers: pr.requestedReviewers,
     sourceUrl: pr.sourceUrl,
     state,
     score,

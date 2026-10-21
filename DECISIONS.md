@@ -1,4 +1,4 @@
-# DECISIONS
+﻿# DECISIONS
 
 > Living document. Each section is filled in as the matching feature lands, so the
 > git history and this file tell the same story.
@@ -113,12 +113,17 @@ I re-read the scoring against what a reviewer would actually trust, and found re
 - **Wait time** starts when the PR last became ready for review (from the issue events), not when it was opened. If GitHub's events cannot be read, the wait is counted from creation and the answer says so and drops to medium confidence.
 - **Confidence means how complete the data was**, not how sure the order is. The queue text and the model prompt now say so.
 
-**Known limits (not fixed, on purpose)**
-- **The weights are still judgment calls.** Nobody has measured them on a real team. They are small and capped so a wrong guess cannot flip a state, but I cannot claim they are optimal. With real usage the right move is to log which PR people actually reviewed first and compare.
-- **The queue is for the whole team, not for you.** A good review queue puts "PRs where *I* am the requested reviewer" first. That needs a Slack-user to GitHub-login mapping that does not exist yet.
-- **Any failing check counts as a blocker, even one that is not required.** Telling them apart needs the branch-protection API, which needs admin permission I do not want to ask this token for.
-- **Size counts every changed line**, including lock files and generated code, because per-file data costs one more GitHub call per PR. A dependency bump can look bigger than it is.
-- **More than 100 events on a PR** means the ready time is reported as unknown rather than guessed.
+**Fixed afterwards, because I did not want to ship a known weakness**
+- **Only required checks block.** The queue now asks GitHub which checks are required to merge (GraphQL `isRequired`, which works with a normal read token; the REST branch-protection call would need admin rights). A failing *optional* check is shown, but it does not push the PR to "waiting on author", and a PR whose only failure is optional can still be "ready to merge" (GitHub reports that as `unstable`). It also reads legacy commit statuses (Jenkins, Travis), which the check-runs API does not include, so a red status can no longer be missed. This was checked against the real repo (`requiredKnown: true`).
+- **Size ignores lock files and generated code.** It reads the per-file list (up to 300 files), leaves out lock files, minified/generated output, snapshots and vendored code, and the fact says how many lines were left out ("4070 more lines of lock/generated files not counted").
+- **Ready time reads up to 500 issue events** instead of giving up at 100.
+- **A personal view.** If the owner links Slack members to GitHub logins (`SLACK_GITHUB_USERS=U01ABC:octocat`), `/triage queue` groups the same ranked list into "waiting for your review", "your pull requests" (with what is theirs to do) and everyone else's. The shared score and order are untouched, so the team view and the personal view cannot disagree. The assistant gets the asker's login too, so "what should I review?" is answered for that person. The mapping is explicit config on purpose: guessing a GitHub account from a Slack name or email could attach one person's review queue to someone else. A draft or a PR waiting on its author is never listed as "review this", even if you were requested.
+
+**Known limits that remain**
+- **The weights are still judgment calls.** Nobody has measured them on a real team, and code cannot fix that: it needs real usage. They are small and capped so a wrong guess cannot flip a state. The plan is to log which PR people actually reviewed first and compare, after the system has run for a while.
+- **Every failing check blocks when a repo defines no required checks at all** (or when GitHub's answer cannot be read). That is the safe default, and when it is the second case the answer says so in its unknowns.
+- **The personal view covers Slack only.** The web page and the morning digest stay team-wide because they have no identity to key on. It also matches only people named as reviewers, not review requests sent to a whole GitHub team.
+- **Size falls back to the raw total** for PRs with 300+ files or if the file list cannot be read; **ready time is "unknown"** past 500 events. Both say so instead of guessing.
 ### Failure halfway through an approved action (design, step 3)
 
 Each posted comment carries a hidden marker `<!-- pr-triage-agent:<id> -->`.
@@ -147,7 +152,7 @@ The first version used Telegram. It worked end to end against real GitHub (a com
 AI tools (Cursor with Claude) wrote most of the first drafts of code and tests, and I reviewed and ran them. The steps below record where that went wrong or needed correcting, because those are the places that taught me something.
 
 **Where AI helped**
-- Fast first drafts of the typed config, the GitHub client with strict response validation, SQLite migrations, and the test suites (152 unit tests at the time of writing).
+- Fast first drafts of the typed config, the GitHub client with strict response validation, SQLite migrations, and the test suites (216 unit tests at the time of writing).
 - Suggesting failure cases I would have skipped: the double-tap on Approve, "approved but GitHub did not answer", and a hostile PR description.
 - Building the eval fixture (a frozen repo with known right answers) so that "is the answer correct" is checkable.
 

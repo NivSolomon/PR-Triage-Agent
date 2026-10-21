@@ -76,6 +76,7 @@ export function createApp(config: Config): App {
     allowedIds: config.SLACK_ALLOWED_USER_IDS,
     allowAllMembers: config.SLACK_ALLOW_ALL_MEMBERS,
     approverIds: config.SLACK_APPROVER_USER_IDS,
+    githubUsers: config.SLACK_GITHUB_USERS,
     agent,
     approvals,
     github,

@@ -40,6 +40,16 @@ describe("loadConfig", () => {
     expect(() => loadConfig({ SLACK_ALLOWED_USER_IDS: "U01ABC, someone" })).toThrow(/Slack member id/);
   });
 
+  it("reads the optional Slack-to-GitHub map", () => {
+    expect(loadConfig({}).SLACK_GITHUB_USERS).toEqual({});
+    expect(loadConfig({ SLACK_GITHUB_USERS: " U01ABC:octocat , W02DEF:Hub-Bot " }).SLACK_GITHUB_USERS).toEqual({
+      U01ABC: "octocat",
+      W02DEF: "Hub-Bot",
+    });
+    expect(() => loadConfig({ SLACK_GITHUB_USERS: "octocat" })).toThrow(/U01ABCDEF:github-login/);
+    expect(() => loadConfig({ SLACK_GITHUB_USERS: "U01ABC:not a login" })).toThrow(/github-login/);
+  });
+
   it("checks the Slack token prefixes so a swapped pair fails with a clear message", () => {
     expect(() => loadConfig({ SLACK_BOT_TOKEN: "xapp-1-abc" })).toThrow(/xoxb-/);
     expect(() => loadConfig({ SLACK_APP_TOKEN: "xoxb-123" })).toThrow(/xapp-/);

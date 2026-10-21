@@ -39,7 +39,7 @@ interface Post {
 }
 
 function setup(
-  over: { allowed?: string[]; approvers?: string[]; allowAll?: boolean; ask?: () => Promise<unknown>; approvals?: object } = {},
+  over: { githubUsers?: Record<string, string>; allowed?: string[]; approvers?: string[]; allowAll?: boolean; ask?: () => Promise<unknown>; approvals?: object } = {},
 ) {
   const posts: Post[] = [];
   const removed: Array<[string, string]> = [];
@@ -74,6 +74,7 @@ function setup(
     allowedIds: over.allowed ?? ["U0ALICE"],
     allowAllMembers: over.allowAll,
     approverIds: over.approvers ?? ["U0BOSS"],
+    githubUsers: over.githubUsers,
     agent: agent as never,
     approvals: approvals as never,
     github: github as never,
@@ -165,6 +166,21 @@ describe("/triage commands", () => {
     expect(replies.join()).toContain("U0STRANGER");
     expect(s.agent.ask).not.toHaveBeenCalled();
     expect(s.github.listOpenPrs).not.toHaveBeenCalled();
+  });
+
+  it("passes the asker's linked GitHub login to the agent, and nothing when they are not linked", async () => {
+    const s = setup({ allowed: ["U0ALICE", "U0BOB"], githubUsers: { U0ALICE: "alice-gh" } });
+    await run(s, "U0ALICE", "what should I review?");
+    await run(s, "U0BOB", "what should I review?");
+    expect((s.agent.ask.mock.calls as unknown[][])[0]?.[0]).toMatchObject({ githubLogin: "alice-gh" });
+    expect((s.agent.ask.mock.calls as unknown[][])[1]?.[0]).toMatchObject({ githubLogin: undefined });
+  });
+
+  it("explains how to get a personal queue only when the feature is set up and the user is not linked", async () => {
+    const s = setup({ allowed: ["U0ALICE", "U0BOB"], githubUsers: { U0ALICE: "alice-gh" } });
+    expect((await run(s, "U0BOB", "queue")).join()).toMatch(/SLACK_GITHUB_USERS/);
+    expect((await run(s, "U0ALICE", "queue")).join()).not.toMatch(/SLACK_GITHUB_USERS/);
+    expect((await run(setup(), "U0ALICE", "queue")).join()).not.toMatch(/SLACK_GITHUB_USERS/);
   });
 
   it("shows help for an empty command or 'help'", async () => {

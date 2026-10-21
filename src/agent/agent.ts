@@ -24,6 +24,8 @@ export interface AskInput {
   actor: string;
   via: ToolContext["via"];
   canPropose: boolean;
+  /** The asker's GitHub login, if known, so "what should I review?" can be answered for them. */
+  githubLogin?: string;
   /** Counted separately in the budget log, e.g. "chat" or "digest". */
   purpose?: string;
 }
@@ -81,6 +83,7 @@ export class Agent {
       actor: input.actor,
       via: input.via,
       canPropose: input.canPropose,
+      githubLogin: input.githubLogin,
       onProposed: (a) => proposed.push(a),
     };
     const specs = toolsFor(ctx);

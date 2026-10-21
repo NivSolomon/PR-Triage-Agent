@@ -7,6 +7,7 @@ const item = (number: number, state: TriageAssessment["state"], extra: Partial<T
   number,
   title: `PR ${number}`,
   author: "dana",
+  requestedReviewers: [],
   sourceUrl: `https://github.com/acme/app/pull/${number}`,
   state,
   score: 50,

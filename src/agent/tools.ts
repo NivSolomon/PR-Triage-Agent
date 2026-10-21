@@ -14,6 +14,8 @@ export interface ToolContext {
   via: "slack" | "web" | "mcp" | "scheduler";
   /** May this caller ask for a comment to be proposed? (Approving is never a tool.) */
   canPropose: boolean;
+  /** GitHub login of the person asking, when known. Lets the queue say what is waiting on them. */
+  githubLogin?: string;
   /** Called with each action the agent proposed in this request, so the channel can show an approval card. */
   onProposed?: (a: ActionRecord) => void;
 }
@@ -104,14 +106,23 @@ export async function runTool(
       case "get_review_queue": {
         const { limit } = queueArgs.parse(rawArgs ?? {});
         const q = await buildQueue(deps.github, { limit, now: deps.now?.() });
+        const me = ctx.githubLogin?.toLowerCase();
         return json({
           repo: q.repo,
           generatedAt: q.generatedAt,
+          // Present only when the asker is linked to a GitHub login. Then "me" and "my" mean this user.
+          ...(ctx.githubLogin ? { you: ctx.githubLogin } : {}),
           moreOpenPrsNotShown: q.truncated,
           queue: q.items.map((a) => ({
             number: a.number,
             title: a.title,
             author: a.author,
+            ...(me
+              ? {
+                  requestedFromYou: a.requestedReviewers.some((r) => r.toLowerCase() === me),
+                  writtenByYou: a.author.toLowerCase() === me,
+                }
+              : {}),
             state: a.state,
             score: a.score,
             confidence: a.confidence,

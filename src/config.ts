@@ -13,6 +13,17 @@ const csv = z
 /** Slack member ids look like U01ABCDEF (or W... on Enterprise Grid). Rejects leftover numeric Telegram ids. */
 const slackIds = csv.pipe(z.array(z.string().regex(/^[UW][A-Z0-9]{2,}$/, "must be a Slack member id like U01ABCDEF")));
 
+/** "U01ABCDEF:octocat,U02XYZ123:hubot": which GitHub login each Slack member is (for the personal queue). */
+const slackGithubMap = csv
+  .pipe(
+    z.array(
+      z
+        .string()
+        .regex(/^[UW][A-Z0-9]{2,}:[A-Za-z0-9][A-Za-z0-9-]{0,38}$/, "must look like U01ABCDEF:github-login"),
+    ),
+  )
+  .transform((pairs) => Object.fromEntries(pairs.map((p) => p.split(":") as [string, string])));
+
 const jsonMap = z
   .string()
   .default("{}")
@@ -47,6 +58,8 @@ const schema = z.object({
     .transform((v) => v === "true"),
   /** Slack member ids allowed to approve or reject. */
   SLACK_APPROVER_USER_IDS: slackIds,
+  /** Optional. Links Slack members to GitHub logins so "what should I review" can be personal. */
+  SLACK_GITHUB_USERS: slackGithubMap,
   /** Channel id (C...) for the scheduled digest. If unset, the digest is sent to each approver as a DM. */
   SLACK_DIGEST_CHANNEL_ID: z.string().regex(/^[CG][A-Z0-9]{2,}$/, "must be a Slack channel id like C01ABCDEF").optional(),
 
