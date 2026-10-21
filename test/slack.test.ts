@@ -5,6 +5,7 @@ import {
   SlackChannel,
   approvalBlocks,
   decidedBlocks,
+  explainSlackError,
   slackActor,
   slackSafe,
 } from "../src/channels/slack.js";
@@ -328,5 +329,25 @@ describe("identity", () => {
     expect(channel.isApprover("slack:U0BOSS")).toBe(true);
     expect(channel.isApprover("slack:U0ALICE")).toBe(false);
     expect(channel.isApprover("telegram:U0BOSS")).toBe(false);
+  });
+});
+
+describe("explainSlackError", () => {
+  const platformError = (error: string, needed?: string) => Object.assign(new Error(`An API error occurred: ${error}`), { data: { error, needed } });
+
+  it("says which token and which scope when the app-level token cannot open the connection", () => {
+    const text = explainSlackError(platformError("missing_scope"), "SLACK_APP_TOKEN");
+    expect(text).toMatch(/SLACK_APP_TOKEN/);
+    expect(text).toMatch(/connections:write/);
+  });
+
+  it("names the missing permission for the bot token", () => {
+    expect(explainSlackError(platformError("missing_scope", "im:write"), "SLACK_BOT_TOKEN")).toMatch(/im:write/);
+  });
+
+  it("explains a rejected token and passes unknown codes through", () => {
+    expect(explainSlackError(platformError("invalid_auth"), "SLACK_BOT_TOKEN")).toMatch(/rejected by Slack/);
+    expect(explainSlackError(platformError("ratelimited"), "SLACK_APP_TOKEN")).toBe("SLACK_APP_TOKEN: ratelimited");
+    expect(explainSlackError(new Error("socket hang up"), "SLACK_APP_TOKEN")).toMatch(/socket hang up/);
   });
 });

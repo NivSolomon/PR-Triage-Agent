@@ -1,6 +1,6 @@
 import { App, LogLevel } from "@slack/bolt";
 import type { KnownBlock } from "@slack/types";
-import type { WebClient } from "@slack/web-api";
+import { WebClient } from "@slack/web-api";
 import { renderApprovalCard } from "../approvals/render.js";
 import type { ApprovalService } from "../approvals/service.js";
 import type { Agent } from "../agent/agent.js";
@@ -120,6 +120,24 @@ export function decidedBlocks(cardText: string, outcome: string): KnownBlock[] {
     type: "section",
     text: { type: "plain_text", text: part, emoji: false },
   }));
+}
+
+/**
+ * Turn a Slack API failure into something the person setting this up can act on.
+ * Slack's own codes ("missing_scope", "invalid_auth") do not say which of the two tokens is at fault.
+ */
+export function explainSlackError(err: unknown, token: "SLACK_APP_TOKEN" | "SLACK_BOT_TOKEN"): string {
+  const data = (err as { data?: { error?: string; needed?: string } } | undefined)?.data;
+  const code = data?.error ?? (err instanceof Error ? err.message : String(err));
+  if (code === "missing_scope") {
+    return token === "SLACK_APP_TOKEN"
+      ? "SLACK_APP_TOKEN is missing the connections:write scope. Create a new app-level token (Basic Information -> App-Level Tokens -> Generate Token) and tick connections:write."
+      : `SLACK_BOT_TOKEN is missing a permission${data?.needed ? ` (${data.needed})` : ""}. Reinstall the app after updating its scopes from slack-app-manifest.yaml.`;
+  }
+  if (code === "invalid_auth" || code === "not_authed" || code === "token_revoked" || code === "account_inactive") {
+    return `${token} was rejected by Slack (${code}). Copy it again from your app's settings.`;
+  }
+  return `${token}: ${code}`;
 }
 
 const HELP = [
@@ -410,6 +428,18 @@ export class SlackChannel {
    * inbound webhook is needed. Fails fast, with Slack's own error, if a token is wrong.
    */
   async start(): Promise<void> {
+    // Check both tokens first. Bolt retries a bad app token forever in the background, which looks like a hang.
+    try {
+      await new WebClient(this.d.appToken).apps.connections.open();
+    } catch (err) {
+      throw new Error(`Could not connect to Slack: ${explainSlackError(err, "SLACK_APP_TOKEN")}`);
+    }
+    try {
+      await new WebClient(this.d.botToken).auth.test();
+    } catch (err) {
+      throw new Error(`Could not connect to Slack: ${explainSlackError(err, "SLACK_BOT_TOKEN")}`);
+    }
+
     const app = new App({
       token: this.d.botToken,
       appToken: this.d.appToken,
@@ -493,9 +523,7 @@ export class SlackChannel {
       this.botUserId = me.user_id;
       console.log(`Slack app connected as @${me.user ?? "app"} in workspace ${me.team ?? "?"}`);
     } catch (err) {
-      throw new Error(
-        `Could not connect to Slack: ${err instanceof Error ? err.message : String(err)}. Check SLACK_BOT_TOKEN and SLACK_APP_TOKEN.`,
-      );
+      throw new Error(`Could not connect to Slack: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 
