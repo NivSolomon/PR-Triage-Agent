@@ -26,6 +26,7 @@ function pr(overrides: Partial<PrDetail> = {}): PrDetail {
     additions: 40,
     deletions: 10,
     changedFiles: 3,
+    reviewableLines: null,
     mergeableState: "clean",
     checks: { total: 3, passing: 3, failing: [], pending: [], sourceUrl: "https://example/checks" },
     reviews: [],
@@ -34,6 +35,71 @@ function pr(overrides: Partial<PrDetail> = {}): PrDetail {
     ...overrides,
   };
 }
+
+describe("assessPr: required vs optional CI, and size", () => {
+  const checks = (over: Partial<NonNullable<PrDetail["checks"]>>) => ({
+    total: 3,
+    passing: 2,
+    failing: ["lint"],
+    pending: [],
+    sourceUrl: "u",
+    ...over,
+  });
+
+  it("a failing check that is not required does not block, and is still shown", () => {
+    const a = assessPr(pr({ checks: checks({ optionalFailing: ["lint"], requiredKnown: true }) }), NOW);
+    expect(a.state).toBe("needs_review");
+    expect(a.signals.find((s) => s.code === "ci_green")?.text).toMatch(/optional.*lint/);
+    expect(a.signals.some((s) => s.code === "ci_failing")).toBe(false);
+  });
+
+  it("a failing required check still blocks, even when an optional one fails too", () => {
+    const a = assessPr(
+      pr({ checks: checks({ failing: ["lint", "build"], optionalFailing: ["lint"], requiredKnown: true }) }),
+      NOW,
+    );
+    expect(a.state).toBe("waiting_on_author");
+    expect(a.signals.find((s) => s.code === "ci_failing")?.text).toBe("CI is failing: build.");
+  });
+
+  it("is ready to merge when only an optional check fails and GitHub reports unstable", () => {
+    const a = assessPr(
+      pr({
+        mergeableState: "unstable",
+        reviews: [approval("sam", "APPROVED", "abc")],
+        checks: checks({ optionalFailing: ["lint"], requiredKnown: true }),
+      }),
+      NOW,
+    );
+    expect(a.state).toBe("ready_to_merge");
+  });
+
+  it("an unstable PR with a REQUIRED failure is not ready to merge", () => {
+    const a = assessPr(
+      pr({ mergeableState: "unstable", reviews: [approval("sam", "APPROVED", "abc")], checks: checks({}) }),
+      NOW,
+    );
+    expect(a.state).toBe("waiting_on_author");
+  });
+
+  it("says so when it could not tell which checks are required", () => {
+    const a = assessPr(pr({ checks: checks({ requiredKnown: false }) }), NOW);
+    expect(a.state).toBe("waiting_on_author");
+    expect(a.unknowns.join(" ")).toMatch(/required/);
+  });
+
+  it("sizes a PR without lock and generated files, and mentions what was left out", () => {
+    const a = assessPr(pr({ additions: 4000, deletions: 100, reviewableLines: 30 }), NOW);
+    const small = a.signals.find((s) => s.code === "small");
+    expect(small?.text).toMatch(/30 lines/);
+    expect(small?.text).toMatch(/4070 more lines of lock\/generated/);
+  });
+
+  it("falls back to the raw total when per-file data is unavailable", () => {
+    const a = assessPr(pr({ additions: 4000, deletions: 100, reviewableLines: null }), NOW);
+    expect(a.signals.some((s) => s.code === "large")).toBe(true);
+  });
+});
 
 describe("assessPr: state", () => {
   it("a small green PR with no blockers needs review, with high confidence", () => {

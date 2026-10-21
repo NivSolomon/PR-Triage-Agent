@@ -20,6 +20,13 @@ export interface CheckSummary {
   passing: number;
   /** Names of checks that concluded failure / timed out / were cancelled. */
   failing: string[];
+  /**
+   * The subset of `failing` that GitHub says is NOT required to merge. Only filled in when the repo defines
+   * required checks; otherwise empty, so every failing check counts as a blocker.
+   */
+  optionalFailing?: string[];
+  /** Did we manage to ask GitHub which checks are required? False = unknown, so failures are treated as blockers. */
+  requiredKnown?: boolean;
   /** Names of checks that have not finished. */
   pending: string[];
   sourceUrl: string;
@@ -47,6 +54,8 @@ export interface PrDetail extends PrSummary {
   additions: number;
   deletions: number;
   changedFiles: number;
+  /** additions + deletions without lock files and generated code. Null = per-file data was unavailable. */
+  reviewableLines: number | null;
   /** When the PR last became ready for review (it can start as a draft). Null = could not be determined. */
   readySince: string | null;
   /** GitHub's merge state: clean | blocked | behind | dirty | unstable | unknown ... */

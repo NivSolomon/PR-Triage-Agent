@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { GitHubClient, GitHubError, isAmbiguousFailure, truncate } from "../src/github/client.js";
+import { GitHubClient, GitHubError, isAmbiguousFailure, isGeneratedFile, truncate } from "../src/github/client.js";
 
 type Route = unknown | { status: number; headers?: Record<string, string> };
 
@@ -68,6 +68,8 @@ describe("getPr", () => {
     "/issues/7/comments": [
       { user: { login: "dana" }, created_at: "2026-10-02T12:00:00Z", body: "Pushed a fix" },
     ],
+    "/pulls/7/files": [],
+    "/status": { statuses: [] },
     "/pulls/7": pr({
       body: "Closes #3",
       additions: 40,
@@ -148,9 +150,111 @@ describe("getPr", () => {
       expect((await withEvents({ status: 403 }).getPr(7)).readySince).toBeNull();
     });
 
+    it("reads past the first page of events", async () => {
+      const filler = Array.from({ length: 100 }, () => ({ event: "labeled", created_at: "2026-10-02T08:00:00Z" }));
+      const detail = await client({
+        ...base,
+        "/issues/7/events?per_page=100&page=2": [{ event: "ready_for_review", created_at: "2026-10-08T08:00:00Z" }],
+        "/issues/7/events": filler,
+        "/check-runs": { total_count: 0, check_runs: [] },
+      }).getPr(7);
+      expect(detail.readySince).toBe("2026-10-08T08:00:00Z");
+    });
+
     it("is unknown when there are too many events to see them all", async () => {
       const many = Array.from({ length: 100 }, () => ({ event: "labeled", created_at: "2026-10-02T08:00:00Z" }));
       expect((await withEvents(many).getPr(7)).readySince).toBeNull();
+    });
+  });
+
+  describe("CI: statuses and required checks", () => {
+    const runs = {
+      total_count: 3,
+      check_runs: [
+        { name: "build", status: "completed", conclusion: "success" },
+        { name: "lint", status: "completed", conclusion: "failure" },
+        { name: "e2e", status: "completed", conclusion: "failure" },
+      ],
+    };
+    const flags = (entries: Array<[string, boolean]>) => ({
+      data: {
+        repository: {
+          pullRequest: {
+            commits: {
+              nodes: [
+                {
+                  commit: {
+                    statusCheckRollup: {
+                      contexts: { nodes: entries.map(([name, isRequired]) => ({ name, isRequired })) },
+                    },
+                  },
+                },
+              ],
+            },
+          },
+        },
+      },
+    });
+
+    it("marks a failing check optional only when GitHub says it is not required", async () => {
+      const detail = await client({
+        ...base,
+        "/graphql": flags([["build", true], ["lint", false], ["e2e", true]]),
+        "/check-runs": runs,
+      }).getPr(7);
+      expect(detail.checks).toMatchObject({ failing: ["lint", "e2e"], optionalFailing: ["lint"], requiredKnown: true });
+    });
+
+    it("treats every failure as blocking when the repo defines no required checks", async () => {
+      const detail = await client({
+        ...base,
+        "/graphql": flags([["build", false], ["lint", false], ["e2e", false]]),
+        "/check-runs": runs,
+      }).getPr(7);
+      expect(detail.checks).toMatchObject({ optionalFailing: [], requiredKnown: true });
+    });
+
+    it("falls back to blocking (and says it does not know) when required flags cannot be read", async () => {
+      const detail = await client({ ...base, "/graphql": { status: 403 }, "/check-runs": runs }).getPr(7);
+      expect(detail.checks).toMatchObject({ optionalFailing: [], requiredKnown: false });
+    });
+
+    it("also reads legacy commit statuses, which check-runs do not include", async () => {
+      const detail = await client({
+        ...base,
+        "/status": {
+          statuses: [
+            { context: "ci/jenkins", state: "failure" },
+            { context: "ci/travis", state: "pending" },
+            { context: "ci/lint", state: "success" },
+          ],
+        },
+        "/check-runs": { total_count: 0, check_runs: [] },
+      }).getPr(7);
+      expect(detail.checks).toMatchObject({ total: 3, passing: 1, failing: ["ci/jenkins"], pending: ["ci/travis"] });
+    });
+  });
+
+  describe("reviewableLines (size without lock and generated files)", () => {
+    const withFiles = (files: Route) =>
+      client({ ...base, "/pulls/7/files": files, "/check-runs": { total_count: 0, check_runs: [] } });
+
+    it("leaves lock files and generated code out", async () => {
+      const detail = await withFiles([
+        { filename: "src/app.ts", additions: 30, deletions: 5 },
+        { filename: "package-lock.json", additions: 4000, deletions: 900 },
+        { filename: "dist/bundle.min.js", additions: 800, deletions: 0 },
+      ]).getPr(7);
+      expect(detail.reviewableLines).toBe(35);
+    });
+
+    it("is unknown (null) when the file list cannot be read", async () => {
+      expect((await withFiles({ status: 403 }).getPr(7)).reviewableLines).toBeNull();
+    });
+
+    it("is unknown when there are too many files to count", async () => {
+      const many = Array.from({ length: 100 }, (_, i) => ({ filename: `f${i}.ts`, additions: 1, deletions: 0 }));
+      expect((await withFiles(many).getPr(7)).reviewableLines).toBeNull();
     });
   });
 
@@ -201,6 +305,26 @@ describe("error handling", () => {
     });
     await expect(failing.listOpenPrs()).rejects.toThrow(/Could not reach GitHub/);
   });
+});
+
+describe("isGeneratedFile", () => {
+  it.each([
+    "package-lock.json",
+    "web/yarn.lock",
+    "pnpm-lock.yaml",
+    "Cargo.lock",
+    "go.sum",
+    "public/app.min.js",
+    "src/__snapshots__/a.test.ts.snap",
+    "dist/index.js",
+    "api/user.pb.go",
+    "src/schema.generated.ts",
+  ])("%s is generated", (f) => expect(isGeneratedFile(f)).toBe(true));
+
+  it.each(["src/app.ts", "README.md", "src/distance.ts", "lockfile-parser.ts", "docs/vendor-guide.md"])(
+    "%s is real code",
+    (f) => expect(isGeneratedFile(f)).toBe(false),
+  );
 });
 
 describe("truncate", () => {

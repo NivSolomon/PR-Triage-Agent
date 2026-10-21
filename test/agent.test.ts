@@ -26,6 +26,7 @@ const detail = (n: number): PrDetail => ({
   additions: 10,
   deletions: 2,
   changedFiles: 1,
+  reviewableLines: null,
   mergeableState: "clean",
   checks: { total: 1, passing: 1, failing: [], pending: [], sourceUrl: "u" },
   reviews: [],

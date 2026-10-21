@@ -82,6 +82,65 @@ const rawReviews = z.array(
   }),
 );
 
+const rawCombinedStatus = z.object({
+  statuses: z.array(z.object({ context: z.string(), state: z.string() })).default([]),
+});
+
+const rawPrFiles = z.array(z.object({ filename: z.string(), additions: z.number(), deletions: z.number() }));
+
+const rawRequiredFlags = z.object({
+  repository: z.object({
+    pullRequest: z.object({
+      commits: z.object({
+        nodes: z.array(
+          z.object({
+            commit: z.object({
+              statusCheckRollup: z
+                .object({
+                  contexts: z.object({
+                    nodes: z.array(
+                      z.object({
+                        name: z.string().optional(),
+                        context: z.string().optional(),
+                        isRequired: z.boolean().optional(),
+                      }),
+                    ),
+                  }),
+                })
+                .nullable(),
+            }),
+          }),
+        ),
+      }),
+    }),
+  }),
+});
+
+const REQUIRED_FLAGS_QUERY = `query($owner: String!, $name: String!, $number: Int!) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $number) {
+      commits(last: 1) { nodes { commit { statusCheckRollup { contexts(first: 100) { nodes {
+        ... on CheckRun { name isRequired(pullRequestNumber: $number) }
+        ... on StatusContext { context isRequired(pullRequestNumber: $number) }
+      } } } } } }
+    }
+  }
+}`;
+
+/** Lock files and generated code inflate a diff without adding review work. */
+const GENERATED_FILE = [
+  /(^|\/)(package-lock\.json|npm-shrinkwrap\.json|yarn\.lock|pnpm-lock\.yaml|bun\.lockb?|Cargo\.lock|Gemfile\.lock|poetry\.lock|Pipfile\.lock|composer\.lock|go\.sum|mix\.lock|pubspec\.lock|Podfile\.lock|packages\.lock\.json)$/,
+  /\.lock$/,
+  /\.min\.(js|css)$/,
+  /\.(map|snap)$/,
+  /(^|\/)(node_modules|vendor|dist|__snapshots__)\//,
+  /(\.|_)generated\.|\.g\.dart$|\.pb\.go$|_pb2(_grpc)?\.py$/,
+];
+
+export function isGeneratedFile(path: string): boolean {
+  return GENERATED_FILE.some((re) => re.test(path));
+}
+
 const rawIssueEvents = z.array(z.object({ event: z.string(), created_at: z.string() }));
 
 const rawComments = z.array(
@@ -148,11 +207,12 @@ export class GitHubClient {
     // Independent lookups run in parallel. CI data is allowed to be unavailable (-> null,
     // reported as "unknown"); reviews and comments failing is a real error and propagates.
     const [checks, reviews, comments, readySince] = await Promise.all([
-      this.getChecks(pr.head.sha),
+      this.getChecks(pr.head.sha, number),
       this.getReviews(number),
       this.getComments(number),
       this.getReadySince(number, pr.created_at),
     ]);
+    const reviewableLines = await this.getReviewableLines(number);
 
     return {
       ...summary,
@@ -160,6 +220,7 @@ export class GitHubClient {
       additions: pr.additions,
       deletions: pr.deletions,
       changedFiles: pr.changed_files,
+      reviewableLines,
       readySince,
       mergeableState: pr.mergeable_state ?? null,
       checks,
@@ -218,9 +279,17 @@ export class GitHubClient {
     };
   }
 
-  private async getChecks(sha: string): Promise<CheckSummary | null> {
+  /**
+   * CI from both check runs and legacy commit statuses (Jenkins, Travis...), plus which failures are optional.
+   * Any failure to read CI gives null = "unknown", never "passing".
+   */
+  private async getChecks(sha: string, number: number): Promise<CheckSummary | null> {
     try {
-      const raw = rawCheckRuns.parse(await this.get(`/commits/${sha}/check-runs?per_page=100`));
+      const [raw, combined, flags] = await Promise.all([
+        this.get(`/commits/${sha}/check-runs?per_page=100`).then((r) => rawCheckRuns.parse(r)),
+        this.get(`/commits/${sha}/status`).then((r) => rawCombinedStatus.parse(r)),
+        this.getRequiredFlags(number),
+      ]);
       const failing: string[] = [];
       const pending: string[] = [];
       let passing = 0;
@@ -229,10 +298,20 @@ export class GitHubClient {
         else if (run.conclusion && FAILING.has(run.conclusion)) failing.push(run.name);
         else if (run.conclusion && PASSING.has(run.conclusion)) passing += 1;
       }
+      for (const s of combined.statuses) {
+        if (s.state === "failure" || s.state === "error") failing.push(s.context);
+        else if (s.state === "pending") pending.push(s.context);
+        else if (s.state === "success") passing += 1;
+      }
+      // Optional only when the repo really defines required checks. With none defined, every failure blocks.
+      const anyRequired = flags ? [...flags.values()].some(Boolean) : false;
+      const optionalFailing = flags && anyRequired ? failing.filter((n) => flags.get(n) === false) : [];
       return {
-        total: raw.total_count,
+        total: raw.total_count + combined.statuses.length,
         passing,
         failing,
+        optionalFailing,
+        requiredKnown: flags !== null,
         pending,
         sourceUrl: `https://github.com/${this.options.repo}/commit/${sha}/checks`,
       };
@@ -242,22 +321,58 @@ export class GitHubClient {
     }
   }
 
-  /**
-   * When the PR last became ready for review. A PR that was a draft for two weeks has not "been waiting"
-   * for two weeks. No ready_for_review event means it was opened ready. Null (unknown) if the events
-   * cannot be read or are too many to see them all, so the caller can say so instead of guessing.
-   */
-  private async getReadySince(number: number, createdAt: string): Promise<string | null> {
+  /** Which checks are required to merge, via GraphQL (REST would need admin rights). Null if it cannot be read. */
+  private async getRequiredFlags(number: number): Promise<Map<string, boolean> | null> {
     try {
-      const events = rawIssueEvents.parse(await this.get(`/issues/${number}/events?per_page=100`));
-      if (events.length >= 100) return null;
-      const ready = events.filter((e) => e.event === "ready_for_review").map((e) => e.created_at).sort();
-      return ready.length > 0 ? (ready[ready.length - 1] as string) : createdAt;
+      const [owner, name] = this.options.repo.split("/");
+      const data = rawRequiredFlags.parse(await this.graphql(REQUIRED_FLAGS_QUERY, { owner, name, number }));
+      const nodes = data.repository.pullRequest.commits.nodes[0]?.commit.statusCheckRollup?.contexts.nodes ?? [];
+      const flags = new Map<string, boolean>();
+      for (const n of nodes) {
+        const key = n.name ?? n.context;
+        if (key !== undefined && n.isRequired !== undefined) flags.set(key, n.isRequired);
+      }
+      return flags;
     } catch {
       return null;
     }
   }
 
+  /** Changed lines a human has to read: lock files and generated code are left out. Null if unknown. */
+  private async getReviewableLines(number: number): Promise<number | null> {
+    try {
+      let total = 0;
+      for (let page = 1; page <= 3; page++) {
+        const files = rawPrFiles.parse(await this.get(`/pulls/${number}/files?per_page=100&page=${page}`));
+        for (const f of files) if (!isGeneratedFile(f.filename)) total += f.additions + f.deletions;
+        if (files.length < 100) return total;
+      }
+      return null; // 300+ files: not worth guessing
+    } catch {
+      return null;
+    }
+  }
+  /**
+   * When the PR last became ready for review. A PR that was a draft for two weeks has not "been waiting"
+   * for two weeks. No ready_for_review event means it was opened ready. Reads up to 500 events; null
+   * (unknown) if they cannot be read or are too many, so the caller can say so instead of guessing.
+   */
+  private async getReadySince(number: number, createdAt: string): Promise<string | null> {
+    try {
+      const ready: string[] = [];
+      for (let page = 1; page <= 5; page++) {
+        const events = rawIssueEvents.parse(await this.get(`/issues/${number}/events?per_page=100&page=${page}`));
+        for (const e of events) if (e.event === "ready_for_review") ready.push(e.created_at);
+        if (events.length < 100) {
+          ready.sort();
+          return ready.length > 0 ? (ready[ready.length - 1] as string) : createdAt;
+        }
+      }
+      return null; // 500+ events: too many to read them all, so say "unknown" instead of guessing
+    } catch {
+      return null;
+    }
+  }
   private async getReviews(number: number): Promise<ReviewSummary[]> {
     const raw = rawReviews.parse(await this.get(`/pulls/${number}/reviews?per_page=100`));
     // Keep the latest meaningful state per reviewer. Plain comments don't override an approval.
@@ -283,6 +398,28 @@ export class GitHubClient {
       body: truncate(c.body, 400),
     }));
     return { recent };
+  }
+
+  private async graphql(query: string, variables: Record<string, unknown>): Promise<unknown> {
+    let res: Response;
+    try {
+      res = await this.fetchImpl(new URL("/graphql", this.baseUrl).toString(), {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${this.options.token}`,
+          "Content-Type": "application/json",
+          "User-Agent": "pr-triage-agent",
+        },
+        body: JSON.stringify({ query, variables }),
+        signal: AbortSignal.timeout(15_000),
+      });
+    } catch (err) {
+      throw new GitHubError(`Could not reach GitHub: ${(err as Error).message}`);
+    }
+    if (!res.ok) throw this.toError(res);
+    const body = (await res.json()) as { data?: unknown; errors?: Array<{ message?: string }> };
+    if (body.errors?.length) throw new GitHubError(`GitHub GraphQL error: ${body.errors[0]?.message ?? "unknown"}`);
+    return body.data;
   }
 
   private get(path: string): Promise<unknown> {

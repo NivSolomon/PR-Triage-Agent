@@ -127,7 +127,11 @@ export function assessPr(pr: PrDetail, now: Date = new Date()): TriageAssessment
     signals.push({ code, text, weight });
   };
 
-  const lines = pr.additions + pr.deletions;
+  // Lock files and generated code are left out of the size; fall back to the raw total if per-file data is missing.
+  const totalLines = pr.additions + pr.deletions;
+  const lines = pr.reviewableLines ?? totalLines;
+  const skippedLines = pr.reviewableLines === null ? 0 : totalLines - pr.reviewableLines;
+  const skippedNote = skippedLines > 0 ? ` (${skippedLines} more lines of lock/generated files not counted)` : "";
   const idleHours = hoursBetween(pr.updatedAt, now);
 
   // The wait clock starts when the PR became ready for review, not when it was opened as a draft.
@@ -144,11 +148,14 @@ export function assessPr(pr: PrDetail, now: Date = new Date()): TriageAssessment
   const changesRequested = pr.reviews.filter((r) => r.state === "CHANGES_REQUESTED");
 
   // --- CI: unknown is never treated as passing ---
+  // A failing check only blocks when it is required to merge (or when we cannot tell).
+  const optionalFailing = pr.checks?.optionalFailing ?? [];
+  const blockingFailing = (pr.checks?.failing ?? []).filter((n) => !optionalFailing.includes(n));
   let ciState: CiState;
   if (pr.checks === null) {
     ciState = "unknown";
     unknowns.push("CI status could not be fetched, so it is not counted as passing.");
-  } else if (pr.checks.failing.length > 0) {
+  } else if (blockingFailing.length > 0) {
     ciState = "red";
   } else if (pr.checks.pending.length > 0) {
     ciState = "pending";
@@ -161,7 +168,12 @@ export function assessPr(pr: PrDetail, now: Date = new Date()): TriageAssessment
 
   // --- merge state ---
   const conflicts = pr.mergeableState === "dirty";
-  const mergeable = pr.mergeableState === "clean" || pr.mergeableState === "has_hooks";
+  // "unstable" = only non-required checks are failing, which does not stop a merge.
+  const onlyOptionalFailing = optionalFailing.length > 0 && blockingFailing.length === 0;
+  const mergeable =
+    pr.mergeableState === "clean" ||
+    pr.mergeableState === "has_hooks" ||
+    (pr.mergeableState === "unstable" && onlyOptionalFailing);
   if (pr.mergeableState === null || pr.mergeableState === "unknown") {
     unknowns.push("GitHub has not computed the merge state (conflicts) yet.");
   }
@@ -178,9 +190,18 @@ export function assessPr(pr: PrDetail, now: Date = new Date()): TriageAssessment
 
   // --- facts and in-band adjustments ---
   if (ciState === "red") {
-    add("ci_failing", `CI is failing: ${pr.checks?.failing.join(", ")}.`, WEIGHTS.blocker);
+    add("ci_failing", `CI is failing: ${blockingFailing.join(", ")}.`, WEIGHTS.blocker);
+    if (pr.checks && pr.checks.requiredKnown === false) {
+      unknowns.push("Could not tell which checks are required to merge, so every failing check is treated as a blocker.");
+    }
   } else if (ciState === "green") {
-    add("ci_green", `All ${pr.checks?.total} CI checks passed.`, WEIGHTS.ciGreen);
+    add(
+      "ci_green",
+      optionalFailing.length > 0
+        ? `All required CI checks passed (optional, not blocking: ${optionalFailing.join(", ")} failing).`
+        : `All ${pr.checks?.total} CI checks passed.`,
+      WEIGHTS.ciGreen,
+    );
   } else if (ciState === "pending") {
     add("ci_pending", `CI is still running: ${pr.checks?.pending.join(", ")}.`, WEIGHTS.ciPending);
   }
@@ -227,9 +248,9 @@ export function assessPr(pr: PrDetail, now: Date = new Date()): TriageAssessment
   }
 
   if (lines <= THRESHOLDS.smallLines) {
-    add("small", `Small change: ${lines} lines in ${pr.changedFiles} file(s), quick to review.`, WEIGHTS.small);
+    add("small", `Small change: ${lines} lines in ${pr.changedFiles} file(s)${skippedNote}, quick to review.`, WEIGHTS.small);
   } else if (lines >= THRESHOLDS.largeLines) {
-    add("large", `Large change: ${lines} lines in ${pr.changedFiles} file(s); plan a longer review.`, WEIGHTS.large);
+    add("large", `Large change: ${lines} lines in ${pr.changedFiles} file(s)${skippedNote}; plan a longer review.`, WEIGHTS.large);
   }
 
   if (pr.requestedReviewers.length > 0 && !pr.draft) {

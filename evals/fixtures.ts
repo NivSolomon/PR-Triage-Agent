@@ -36,6 +36,7 @@ const base = (number: number, title: string, over: Partial<PrDetail> = {}): PrDe
   additions: 40,
   deletions: 10,
   changedFiles: 3,
+  reviewableLines: null,
   mergeableState: "clean",
   checks: green,
   reviews: [],
