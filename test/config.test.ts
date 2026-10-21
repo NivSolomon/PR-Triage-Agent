@@ -48,6 +48,15 @@ describe("loadConfig", () => {
     expect(c.SLACK_DIGEST_CHANNEL_ID).toBe("C01ABC");
   });
 
+  it("lets the whole workspace chat only when SLACK_ALLOW_ALL_MEMBERS is exactly true; default is off", () => {
+    expect(loadConfig({}).SLACK_ALLOW_ALL_MEMBERS).toBe(false);
+    expect(loadConfig({ SLACK_ALLOW_ALL_MEMBERS: "" }).SLACK_ALLOW_ALL_MEMBERS).toBe(false);
+    expect(loadConfig({ SLACK_ALLOW_ALL_MEMBERS: "true" }).SLACK_ALLOW_ALL_MEMBERS).toBe(true);
+    expect(loadConfig({ SLACK_ALLOW_ALL_MEMBERS: "false" }).SLACK_ALLOW_ALL_MEMBERS).toBe(false);
+    // A typo must fail loudly, not silently open or close access.
+    expect(() => loadConfig({ SLACK_ALLOW_ALL_MEMBERS: "yes" })).toThrow(/true/);
+  });
+
   it("rejects a digest target that is not a channel id", () => {
     expect(() => loadConfig({ SLACK_DIGEST_CHANNEL_ID: "#general" })).toThrow(/channel id/);
   });

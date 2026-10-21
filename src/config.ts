@@ -40,6 +40,11 @@ const schema = z.object({
   SLACK_APP_TOKEN: z.string().startsWith("xapp-", "must be an app-level token starting with xapp-").optional(),
   /** Slack member ids allowed to chat with the bot. Approvers are always allowed too. */
   SLACK_ALLOWED_USER_IDS: slackIds,
+  /** "true": every member of the Slack workspace may chat. Approving still needs SLACK_APPROVER_USER_IDS. */
+  SLACK_ALLOW_ALL_MEMBERS: z
+    .enum(["true", "false"], { error: 'must be "true" or "false"' })
+    .default("false")
+    .transform((v) => v === "true"),
   /** Slack member ids allowed to approve or reject. */
   SLACK_APPROVER_USER_IDS: slackIds,
   /** Channel id (C...) for the scheduled digest. If unset, the digest is sent to each approver as a DM. */

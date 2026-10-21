@@ -74,6 +74,7 @@ export function createApp(config: Config): App {
     botToken: env.SLACK_BOT_TOKEN,
     appToken: env.SLACK_APP_TOKEN,
     allowedIds: config.SLACK_ALLOWED_USER_IDS,
+    allowAllMembers: config.SLACK_ALLOW_ALL_MEMBERS,
     approverIds: config.SLACK_APPROVER_USER_IDS,
     agent,
     approvals,

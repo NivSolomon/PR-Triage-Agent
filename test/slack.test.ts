@@ -38,7 +38,9 @@ interface Post {
   opts?: { threadTs?: string; blocks?: unknown[] };
 }
 
-function setup(over: { allowed?: string[]; approvers?: string[]; ask?: () => Promise<unknown>; approvals?: object } = {}) {
+function setup(
+  over: { allowed?: string[]; approvers?: string[]; allowAll?: boolean; ask?: () => Promise<unknown>; approvals?: object } = {},
+) {
   const posts: Post[] = [];
   const removed: Array<[string, string]> = [];
   let n = 0;
@@ -70,6 +72,7 @@ function setup(over: { allowed?: string[]; approvers?: string[]; ask?: () => Pro
     botToken: "xoxb-test",
     appToken: "xapp-test",
     allowedIds: over.allowed ?? ["U0ALICE"],
+    allowAllMembers: over.allowAll,
     approverIds: over.approvers ?? ["U0BOSS"],
     agent: agent as never,
     approvals: approvals as never,
@@ -227,6 +230,36 @@ describe("direct messages and mentions", () => {
     expect(s.posts.every((p) => p.channel === "C0TEAM" && p.opts?.threadTs === "111.222")).toBe(true);
     expect(s.posts.map((p) => p.text)).toContain("Review #7 first.");
     expect(s.removed).toEqual([["C0TEAM", "ts1"]]); // the placeholder
+  });
+
+  describe("when every workspace member may chat (SLACK_ALLOW_ALL_MEMBERS)", () => {
+    it("answers someone who is not on the list, in a DM and with /triage", async () => {
+      const s = setup({ allowAll: true });
+      await s.channel.handleMessage({ userId: "U0TESTER", channel: "D0X", text: "what should we review first?" });
+      expect(s.agent.ask).toHaveBeenCalledTimes(1);
+      expect(s.posts.map((p) => p.text).join("\n")).not.toMatch(/not on the access list/);
+
+      const replies: string[] = [];
+      await s.channel.handleCommand({ userId: "U0TESTER", text: "what is blocking #7?", reply: async (t) => void replies.push(t) });
+      expect(s.agent.ask).toHaveBeenCalledTimes(2);
+      expect(replies.join()).not.toMatch(/not on the access list/);
+    });
+
+    it("lets them ask for a comment but never makes them an approver", async () => {
+      const s = setup({ allowAll: true });
+      expect(s.channel.isApprover("slack:U0TESTER")).toBe(false);
+      expect(s.channel.isApprover("slack:U0BOSS")).toBe(true);
+      // The asker is passed on as an ordinary Slack actor; approving is decided by the approval service, not by chat access.
+      await s.channel.handleMessage({ userId: "U0TESTER", channel: "D0X", text: "leave a comment on #7" });
+      expect(s.agent.ask).toHaveBeenCalledWith(expect.objectContaining({ actor: "slack:U0TESTER" }));
+    });
+
+    it("is off by default: a stranger is still turned away", async () => {
+      const s = setup({ allowAll: false });
+      await s.channel.handleMessage({ userId: "U0TESTER", channel: "D0X", text: "hi" });
+      expect(s.agent.ask).not.toHaveBeenCalled();
+      expect(s.posts[0]?.text).toMatch(/not on the access list/);
+    });
   });
 
   it("does not answer, or spend money for, someone who is not on the list", async () => {

@@ -217,6 +217,11 @@ export interface SlackDeps {
   appToken: string;
   /** Slack member ids allowed to chat. Approvers are always allowed too. */
   allowedIds: string[];
+  /**
+   * Let every member of the workspace chat, instead of only `allowedIds`. This widens who may ASK
+   * (and so who may use the AI budget) and nothing else: approving is still `approverIds` only.
+   */
+  allowAllMembers?: boolean;
   /** Slack member ids allowed to approve or reject. */
   approverIds: string[];
   agent: Agent;
@@ -244,6 +249,11 @@ export class SlackChannel {
 
   isApprover(actorId: string): boolean {
     return this.approvers.has(actorId.replace(/^slack:/, ""));
+  }
+
+  /** May this person talk to the agent? Never implies approval rights (see `isApprover`). */
+  private canChat(userId: string): boolean {
+    return this.d.allowAllMembers === true || this.allowed.has(userId);
   }
 
   private requireApi(): SlackApi {
@@ -299,7 +309,7 @@ export class SlackChannel {
     const say = async (text: string): Promise<void> => {
       for (const part of splitMessage(text, MESSAGE_MAX)) await p.reply(part);
     };
-    if (!this.allowed.has(p.userId)) return say(this.deny(p.userId));
+    if (!this.canChat(p.userId)) return say(this.deny(p.userId));
 
     const [head = "", ...rest] = p.text.trim().split(/\s+/);
     const word = head.toLowerCase();
@@ -348,7 +358,7 @@ export class SlackChannel {
     const post = async (text: string): Promise<void> => {
       for (const part of splitMessage(text, MESSAGE_MAX)) await api.post(p.channel, part, opts);
     };
-    if (!this.allowed.has(p.userId)) return post(this.deny(p.userId));
+    if (!this.canChat(p.userId)) return post(this.deny(p.userId));
 
     const text = this.stripMention(p.text);
     if (text === "" || /^help$/i.test(text)) return post(HELP);

@@ -22,7 +22,7 @@ Design reasoning, trade-offs, cost estimate, evals and the answers to the unders
 
 ## How a tester uses it
 
-1. **Talk to it:** in Slack, open the **PR Triage Agent** app (Apps in the sidebar) and send `/triage help`, or message it directly. If you are not on the access list it replies with your Slack member ID; the owner adds it to `SLACK_ALLOWED_USER_IDS`.
+1. **Talk to it:** in Slack, open the **PR Triage Agent** app (Apps in the sidebar) and send `/triage help`, or message it directly. If the deployment is not set to `SLACK_ALLOW_ALL_MEMBERS=true` and you are not on the access list, it replies with your Slack member ID; the owner adds it to `SLACK_ALLOWED_USER_IDS`.
    Or open the deployment URL and sign in with the access key you were given.
 2. **Ask:** message the app directly (its **Messages** tab): your questions and its answers stay in the conversation. In a channel, @mention it and it replies in a thread. For quick, private lookups that use no AI credit: `/triage queue`, `/triage digest`, `/triage budget`, `/triage pending` (slash-command replies are private to you and temporary; that is how Slack treats them).
 3. **Trigger the approved action:** ask "Leave a comment on #12 asking the author to fix CI". The agent only *proposes*. An approval card with the exact text appears for the approvers.
@@ -75,6 +75,7 @@ Secrets are **never committed**. Locally they live in `.env` (git-ignored); in p
 | `SLACK_BOT_TOKEN` | yes | Bot token, starts with `xoxb-` (OAuth & Permissions) |
 | `SLACK_APP_TOKEN` | yes | App-level token, starts with `xapp-`, scope `connections:write` (Socket Mode) |
 | `SLACK_ALLOWED_USER_IDS` | no | Comma-separated Slack member IDs (`U01ABCDEF`) allowed to chat. Empty means only approvers |
+| `SLACK_ALLOW_ALL_MEMBERS` | no | `true` lets every member of the workspace chat (for testers), `false` (default) uses only the list above. Never grants approval rights |
 | `SLACK_APPROVER_USER_IDS` | yes | Comma-separated member IDs allowed to approve (also allowed to chat) |
 | `SLACK_DIGEST_CHANNEL_ID` | no | Channel ID (`C01ABCDEF`) for the digest; defaults to a DM to every approver |
 | `WEB_ACCESS_KEY` | for the web page | 16+ chars. Read, chat, ask for a comment |
@@ -104,7 +105,7 @@ fly secrets set \
   GITHUB_TOKEN=... GITHUB_REPO=owner/repo \
   LLM_API_KEY=... \
   SLACK_BOT_TOKEN=xoxb-... SLACK_APP_TOKEN=xapp-... \
-  SLACK_ALLOWED_USER_IDS=U01AAAAAA,U02BBBBBB SLACK_APPROVER_USER_IDS=U01AAAAAA \
+  SLACK_ALLOW_ALL_MEMBERS=true SLACK_APPROVER_USER_IDS=U01AAAAAA \
   WEB_ACCESS_KEY=... WEB_APPROVER_KEY=... \
   MCP_TOKENS='{"<token-1>":"reader","<token-2>":"proposer"}' \
   PUBLIC_BASE_URL=https://<your-app>.fly.dev
