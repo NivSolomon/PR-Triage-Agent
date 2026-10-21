@@ -70,6 +70,8 @@ A dashboard can list; it cannot explain, and it cannot draft a comment that a hu
 
 Why: an MCP client is another program, possibly driven by another model reading untrusted text. If it could approve its own proposal, "human approval" would be decorative. So approval rights live only in `ApprovalService.isApprover`, which accepts Slack member ids from `SLACK_APPROVER_USER_IDS` and the web approver key, and no MCP identity. The MCP role names say what they do (`reader`, `proposer`); an earlier draft called the second one `approver`, which would have promised something the system must never allow, so it was renamed and the config rejects `approver`. `ask_triage_agent` passes the caller's role into the agent (`canPropose`), so a reader cannot get a proposal by asking the model nicely. Each client gets its own actor id (hash of its token, never the token), which is used for the audit trail and the per-client daily cap.
 
+**The same rule on the web page.** The web access key (`WEB_ACCESS_KEY`) may *ask for* a comment, exactly like a Slack user on the allow-list, because asking is harmless: it only creates a pending request. Only `WEB_APPROVER_KEY` (or a Slack id in `SLACK_APPROVER_USER_IDS`) can approve. So on every channel, "who may start the action" is wider than "who may approve it", and the second list is the only one that matters for safety.
+
 ### Evals
 
 The fixture repo has six PRs with known answers: #101 is the one correct "review first" (small, green, unreviewed, waited longest), #102 has failing CI, #103 is a draft, #104 is approved and green, #105 has unfetchable CI, and #106 carries a prompt-injection attempt in its description. Nobody is an approver during evals, so any GitHub write would itself be a failure.
@@ -115,12 +117,13 @@ The first version used Telegram. It worked end to end against real GitHub (a com
 - **The card first used `plain_text` and the live test showed it collapsing line breaks into one paragraph**, even though Slack had stored them correctly (I checked the stored message). Unit tests could not catch that, only looking at the real message could. It now uses `mrkdwn` with escaping and a code block for the exact text.
 - **Approve asks again.** A confirmation dialog ("Post this comment?") sits on the Approve button, because a public comment cannot be unposted by the agent.
 - **Not verified live yet.** The channel logic is unit-tested with a fake Slack API (permissions, escaping, approval flow, thread replies, one question at a time). The real SDK was started with invalid tokens to confirm the failure is a clear message. Running it in a real workspace is the remaining check.
+
 ## 5. Where AI helped and where it was wrong
 
 AI tools (Cursor with Claude) wrote most of the first drafts of code and tests, and I reviewed and ran them. The steps below record where that went wrong or needed correcting, because those are the places that taught me something.
 
 **Where AI helped**
-- Fast first drafts of the typed config, the GitHub client with strict response validation, SQLite migrations, and the test suites (so far 147 unit tests).
+- Fast first drafts of the typed config, the GitHub client with strict response validation, SQLite migrations, and the test suites (152 unit tests at the time of writing).
 - Suggesting failure cases I would have skipped: the double-tap on Approve, "approved but GitHub did not answer", and a hostile PR description.
 - Building the eval fixture (a frozen repo with known right answers) so that "is the answer correct" is checkable.
 
