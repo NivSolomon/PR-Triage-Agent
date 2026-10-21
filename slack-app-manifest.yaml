@@ -1,0 +1,38 @@
+# Slack app manifest. In Slack: api.slack.com/apps -> Create New App -> From a manifest -> paste this.
+# Socket Mode is on, so the app needs no public URL or webhook: it opens an outbound connection.
+display_information:
+  name: PR Triage Agent
+  description: Ranks open pull requests with reasons and confidence. Posts a comment only after a human approves it.
+  background_color: "#1f2937"
+features:
+  app_home:
+    home_tab_enabled: false
+    messages_tab_enabled: true
+    messages_tab_read_only_enabled: false
+  bot_user:
+    display_name: PR Triage Agent
+    always_online: true
+  slash_commands:
+    - command: /triage
+      description: PR review queue, digest, budget, or ask a question
+      usage_hint: "[queue | pending | digest | budget | help | your question]"
+      should_escape: false
+oauth_config:
+  scopes:
+    bot:
+      - app_mentions:read   # answer when @mentioned in a channel
+      - chat:write          # post answers, approval cards and the digest
+      - chat:write.public   # post the digest to a public channel without being invited
+      - commands            # the /triage command
+      - im:history          # read direct messages sent to the app
+      - im:write            # open a direct message to deliver approval cards
+settings:
+  event_subscriptions:
+    bot_events:
+      - app_mention
+      - message.im
+  interactivity:
+    is_enabled: true        # the Approve / Reject buttons
+  org_deploy_enabled: false
+  socket_mode_enabled: true
+  token_rotation_enabled: false

@@ -39,11 +39,25 @@ export interface SlackApi {
 
 /** Posts through Slack's Web API with formatting and link previews switched off. */
 export class BoltSlackApi implements SlackApi {
+  private readonly dms = new Map<string, string>();
+
   constructor(private readonly client: WebClient) {}
 
-  async post(channel: string, text: string, opts: { threadTs?: string; blocks?: KnownBlock[] } = {}): Promise<string | undefined> {
+  /** A person id (U... / W...) is turned into the id of the direct-message channel with the app. */
+  private async resolve(target: string): Promise<string> {
+    if (!/^[UW]/.test(target)) return target;
+    const known = this.dms.get(target);
+    if (known) return known;
+    const opened = await this.client.conversations.open({ users: target });
+    const id = opened.channel?.id;
+    if (!id) throw new Error(`Could not open a direct message with ${target}`);
+    this.dms.set(target, id);
+    return id;
+  }
+
+  async post(target: string, text: string, opts: { threadTs?: string; blocks?: KnownBlock[] } = {}): Promise<string | undefined> {
     const res = await this.client.chat.postMessage({
-      channel,
+      channel: await this.resolve(target),
       text: slackSafe(text), // with blocks, this is only the notification fallback
       ...(opts.blocks ? { blocks: opts.blocks } : {}),
       ...(opts.threadTs ? { thread_ts: opts.threadTs } : {}),

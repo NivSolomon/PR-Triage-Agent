@@ -1,4 +1,4 @@
-﻿<!doctype html>
+<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -32,9 +32,9 @@
   <!-- Channels -->
   <text x="20" y="22" font-size="12" font-weight="700" fill="#475569">CHANNELS (who may do what)</text>
   <rect x="20" y="32" width="190" height="86" rx="8" fill="#eff6ff" stroke="#2563eb"/>
-  <text x="32" y="52" font-size="12" font-weight="700">Telegram bot</text>
-  <text x="32" y="68" font-size="10">private chats, allow-list of user ids</text>
-  <text x="32" y="82" font-size="10">/queue /digest /budget /pending</text>
+  <text x="32" y="52" font-size="12" font-weight="700">Slack app</text>
+  <text x="32" y="68" font-size="10">/triage, DMs, @mentions; id allow-list</text>
+  <text x="32" y="82" font-size="10">queue | digest | budget | pending</text>
   <text x="32" y="96" font-size="10" fill="#15803d" font-weight="600">Approve / Reject buttons</text>
   <text x="32" y="110" font-size="10" fill="#15803d">(approver ids only)</text>
 
@@ -58,7 +58,7 @@
 
   <rect x="290" y="58" width="480" height="40" rx="6" fill="#fff" stroke="#94a3b8"/>
   <text x="302" y="75" font-size="11" font-weight="700">Channel handlers</text>
-  <text x="302" y="90" font-size="10">authenticate, validate input, send plain text only (PR text is untrusted)</text>
+  <text x="302" y="90" font-size="10">authenticate, validate input, escape + plain text only (PR text is untrusted)</text>
 
   <rect x="290" y="110" width="300" height="130" rx="6" fill="#fefce8" stroke="#ca8a04"/>
   <text x="302" y="128" font-size="11" font-weight="700">Agent (LLM tool loop)</text>
@@ -120,15 +120,15 @@
   <text x="852" y="200" font-size="10">sees only compact tool results</text>
 
   <rect x="840" y="228" width="240" height="50" rx="8" fill="#fff" stroke="#334155"/>
-  <text x="852" y="248" font-size="12" font-weight="700">Telegram Bot API</text>
-  <text x="852" y="264" font-size="10">long polling (no public webhook)</text>
+  <text x="852" y="248" font-size="12" font-weight="700">Slack API (Socket Mode)</text>
+  <text x="852" y="264" font-size="10">outbound WebSocket (no public URL)</text>
 
   <!-- Human approver -->
   <rect x="840" y="400" width="240" height="92" rx="8" fill="#f0fdf4" stroke="#15803d" stroke-width="2"/>
   <text x="852" y="420" font-size="12" font-weight="700" fill="#15803d">HUMAN APPROVER</text>
   <text x="852" y="436" font-size="10">sees the approval card: exact comment text,</text>
   <text x="852" y="449" font-size="10">PR, link, reason, who asked, expiry</text>
-  <text x="852" y="465" font-size="10">decides in Telegram (button) or on the web</text>
+  <text x="852" y="465" font-size="10">decides in Slack (button) or on the web</text>
   <text x="852" y="478" font-size="10">page (approver key). Nothing else can.</text>
 
   <!-- Arrows: channels to container -->
@@ -157,9 +157,9 @@
   <line x1="770" y1="270" x2="840" y2="258" stroke="#334155" stroke-width="1.5" marker-end="url(#a)"/>
   <text x="790" y="256" font-size="9">digest</text>
 
-  <!-- Telegram updates in/out of the handlers -->
+  <!-- Slack events in/out of the handlers -->
   <line x1="840" y1="236" x2="773" y2="82" stroke="#334155" stroke-width="1.5" marker-start="url(#a)" marker-end="url(#a)"/>
-  <!-- Approver path: the human uses Telegram buttons (or the web page), which reach the approval service through the handlers -->
+  <!-- Approver path: the human uses Slack buttons (or the web page), which reach the approval service through the handlers -->
   <line x1="960" y1="400" x2="960" y2="280" stroke="#15803d" stroke-width="2" stroke-dasharray="6 3" marker-end="url(#g)"/>
   <text x="968" y="380" font-size="9" fill="#15803d" font-weight="600">presses Approve / Reject</text>
 
@@ -176,7 +176,7 @@
   <rect x="20" y="520" width="1060" height="70" rx="8" fill="#fff7ed" stroke="#ea580c"/>
   <text x="32" y="538" font-size="12" font-weight="700" fill="#c2410c">WHERE SECRETS ARE KEPT</text>
   <text x="32" y="553" font-size="10">Platform secrets / environment variables only (<tspan font-family="Consolas, monospace">fly secrets set</tspan>, or a git-ignored <tspan font-family="Consolas, monospace">.env</tspan> locally). Never in git, never in the image, never in SQLite.</tspan></text>
-  <text x="32" y="567" font-size="10">GITHUB_TOKEN, LLM_API_KEY, TELEGRAM_BOT_TOKEN, WEB_ACCESS_KEY, WEB_APPROVER_KEY, MCP_TOKENS. Approver identities: APPROVER_TELEGRAM_IDS and the web approver key.</text>
+  <text x="32" y="567" font-size="10">GITHUB_TOKEN, LLM_API_KEY, SLACK_BOT_TOKEN, SLACK_APP_TOKEN, WEB_ACCESS_KEY, WEB_APPROVER_KEY, MCP_TOKENS. Approver identities: SLACK_APPROVER_USER_IDS and the web approver key.</text>
   <text x="32" y="581" font-size="10">Keys are compared in constant time, sent as Bearer headers (not URLs); MCP clients are logged by a hash of their token, not the token.</text>
 </svg>
 
@@ -184,7 +184,7 @@
   <div>
     <h2>Flow of an approved comment</h2>
     <ol>
-      <li>A user asks in Telegram, on the web or over MCP: "comment on #102 asking for a CI fix".</li>
+      <li>A user asks in Slack, on the web or over MCP: "comment on #102 asking for a CI fix".</li>
       <li>The agent fetches fresh data, then calls <code>propose_comment</code> (only if the caller may propose).</li>
       <li>The approval service stores a <b>pending</b> row. <b>Nothing is sent to GitHub.</b></li>
       <li>Approvers get a card with the exact text. They press Approve or Reject.</li>
@@ -201,7 +201,7 @@
     </ul>
     <h2 style="margin-top:6px">Deployment</h2>
     <ul>
-      <li>One container, one volume, exactly one instance (polling + SQLite).</li>
+      <li>One container, one volume, exactly one instance (Slack connection, scheduler, SQLite).</li>
       <li>Health check <code>GET /healthz</code>; config in <code>fly.toml</code>, steps in README.</li>
     </ul>
   </div>
