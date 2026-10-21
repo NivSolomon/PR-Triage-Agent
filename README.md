@@ -24,7 +24,7 @@ Design reasoning, trade-offs, cost estimate, evals and the answers to the unders
 
 1. **Talk to it:** in Slack, open the **PR Triage Agent** app (Apps in the sidebar) and send `/triage help`, or message it directly. If you are not on the access list it replies with your Slack member ID; the owner adds it to `SLACK_ALLOWED_USER_IDS`.
    Or open the deployment URL and sign in with the access key you were given.
-2. **Ask:** type `/triage What should we review first?` (the answer is private to you), or message the app or @mention it in a channel. Commands that use no AI credit: `/triage queue`, `/triage digest`, `/triage budget`, `/triage pending`.
+2. **Ask:** message the app directly (its **Messages** tab): your questions and its answers stay in the conversation. In a channel, @mention it and it replies in a thread. For quick, private lookups that use no AI credit: `/triage queue`, `/triage digest`, `/triage budget`, `/triage pending` (slash-command replies are private to you and temporary; that is how Slack treats them).
 3. **Trigger the approved action:** ask "Leave a comment on #12 asking the author to fix CI". The agent only *proposes*. An approval card with the exact text appears for the approvers.
 4. **Who approves, and where:**
    - **Slack approvers** (`SLACK_APPROVER_USER_IDS`) receive the card as a direct message from the app with **Approve and post** (asks "Post this comment?" first) and **Reject** buttons.

@@ -194,7 +194,7 @@ describe("/triage commands", () => {
   it("sends free text to the assistant and returns the answer privately", async () => {
     const s = setup();
     const replies = await run(s, "U0ALICE", "What should we review first?");
-    expect(replies).toEqual(["Review #7 first."]);
+    expect(replies).toEqual(["You asked: What should we review first?\n\nReview #7 first."]);
     expect(s.agent.ask).toHaveBeenCalledWith(expect.objectContaining({ canPropose: true }));
   });
 

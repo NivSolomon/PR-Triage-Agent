@@ -197,16 +197,18 @@ export function explainSlackError(err: unknown, token: "SLACK_APP_TOKEN" | "SLAC
 const HELP = [
   "I help your team decide which pull requests to review first, using live GitHub data.",
   "",
-  "Message me here, or type /triage followed by a question, for example:",
+  "The best way to talk to me is to message me directly (the app's Messages tab): your questions and my answers stay in the conversation. In a channel, @mention me and I reply in a thread.",
+  "Examples:",
   "- What should we review first?",
   "- Why is #12 blocked?",
   "- Leave a comment on #12 asking the author to fix CI (an approver must approve it first)",
   "",
-  "Commands:",
+  "Quick commands (replies are private to you and temporary):",
   "/triage queue - ranked review queue (no AI credit used)",
   "/triage pending - actions waiting for approval",
   "/triage digest - the morning digest, on demand",
   "/triage budget - AI budget status",
+  "/triage <question> - ask without opening the conversation",
   "/triage help - this message",
 ].join("\n");
 
@@ -322,12 +324,20 @@ export class SlackChannel {
     if (isCommand && word === "budget") return say(renderBudget(this.d.budget.summary()));
     if (isCommand && word === "pending") return this.showPending(p.userId, say);
 
-    // Anything else is a question for the assistant.
+    // Anything else is a question for the assistant. A slash command does not leave the question in the
+    // chat and its reply is private and temporary, so the answer repeats the question to make sense alone.
+    const question = p.text.trim();
+    let first = true;
     return this.converse({
       userId: p.userId,
       conversationId: `slack:${p.userId}`,
-      text: p.text.trim(),
-      say,
+      text: question,
+      say: async (t) => {
+        if (!first) return say(t);
+        first = false;
+        const shown = question.length > 300 ? `${question.slice(0, 300)}...` : question;
+        return say(`You asked: ${shown}\n\n${t}`);
+      },
     });
   }
 
