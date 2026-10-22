@@ -43,7 +43,7 @@ describe("Agent applies the grounding check", () => {
         github: {
           repo: "a/b",
           listOpenPrs: async () => [{ number: 101, title: "t", sourceUrl: "u" }] as never,
-          getPr: async () => ({ number: 101, title: "t", author: "x", draft: false, createdAt: "2026-10-19T00:00:00Z", readySince: "2026-10-19T00:00:00Z", updatedAt: "2026-10-20T00:00:00Z", labels: [], requestedReviewers: [], baseBranch: "main", headSha: "s", sourceUrl: "u", body: "", additions: 1, deletions: 1, changedFiles: 1, reviewableLines: null, mergeableState: "clean", checks: { total: 1, passing: 1, failing: [], pending: [], sourceUrl: "c" }, reviews: [], recentComments: [], commentCount: 0 }),
+          getPr: async () => ({ number: 101, title: "t", author: "x", draft: false, createdAt: "2026-10-19T00:00:00Z", readySince: "2026-10-19T00:00:00Z", updatedAt: "2026-10-20T00:00:00Z", labels: [], requestedReviewers: [], baseBranch: "main", headBranch: "fix/ci", headSha: "s", sourceUrl: "u", body: "", additions: 1, deletions: 1, changedFiles: 1, reviewableLines: null, mergeableState: "clean", checks: { total: 1, passing: 1, failing: [], pending: [], sourceUrl: "c" }, reviews: [], recentComments: [], commentCount: 0 }),
         },
         approvals: { propose: vi.fn() } as never,
       },

@@ -154,6 +154,9 @@ export async function runTool(
             draft: pr.draft,
             createdAt: pr.createdAt,
             updatedAt: pr.updatedAt,
+            // The branch the changes are on and the one they would merge into. Names are chosen by the author.
+            headBranch: pr.headBranch,
+            baseBranch: pr.baseBranch,
             changedFiles: pr.changedFiles,
             additions: pr.additions,
             deletions: pr.deletions,

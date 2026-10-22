@@ -30,6 +30,7 @@ const base = (number: number, title: string, over: Partial<PrDetail> = {}): PrDe
   labels: [],
   requestedReviewers: [],
   baseBranch: "main",
+  headBranch: `fix/pr-${number}`,
   headSha: `sha${number}`,
   sourceUrl: prUrl(number),
   body: "",
@@ -80,6 +81,7 @@ const summaryOf = (p: PrDetail): PrSummary => ({
   labels: p.labels,
   requestedReviewers: p.requestedReviewers,
   baseBranch: p.baseBranch,
+  headBranch: p.headBranch,
   headSha: p.headSha,
   sourceUrl: p.sourceUrl,
 });

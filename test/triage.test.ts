@@ -20,6 +20,7 @@ function pr(overrides: Partial<PrDetail> = {}): PrDetail {
     labels: [],
     requestedReviewers: [],
     baseBranch: "main",
+    headBranch: "fix/ci",
     headSha: "abc",
     sourceUrl: "https://github.com/acme/app/pull/1",
     body: "",

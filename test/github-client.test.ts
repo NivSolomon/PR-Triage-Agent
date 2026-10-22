@@ -31,7 +31,7 @@ const pr = (over: Record<string, unknown> = {}) => ({
   labels: [{ name: "bug" }],
   requested_reviewers: [{ login: "lee" }],
   base: { ref: "main" },
-  head: { sha: "abc123" },
+  head: { sha: "abc123", ref: "fix/login" },
   ...over,
 });
 
@@ -47,6 +47,8 @@ describe("listOpenPrs", () => {
         author: "dana",
         labels: ["bug"],
         requestedReviewers: ["lee"],
+        baseBranch: "main",
+        headBranch: "fix/login",
         sourceUrl: "https://github.com/acme/app/pull/7",
       }),
     ]);

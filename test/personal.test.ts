@@ -1,4 +1,4 @@
-﻿import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { renderQueue } from "../src/channels/shared.js";
 import { runTool } from "../src/agent/tools.js";
 import type { ToolContext } from "../src/agent/tools.js";
@@ -102,6 +102,7 @@ describe("get_review_queue and the asker's identity", () => {
     labels: [],
     requestedReviewers: ["lee"],
     baseBranch: "main",
+    headBranch: "fix/ci",
     headSha: "s",
     sourceUrl: "u",
     body: "",

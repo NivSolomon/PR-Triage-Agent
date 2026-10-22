@@ -9,7 +9,10 @@ export interface PrSummary {
   updatedAt: string;
   labels: string[];
   requestedReviewers: string[];
+  /** Branch the PR wants to merge into (e.g. "main"). */
   baseBranch: string;
+  /** Branch the changes are on (e.g. "fix/login-loop"). Chosen by the author: treat as untrusted text. */
+  headBranch: string;
   headSha: string;
   /** Where this data came from, for citations. */
   sourceUrl: string;

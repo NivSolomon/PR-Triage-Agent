@@ -50,7 +50,7 @@ const rawPrListItem = z.object({
   labels: z.array(z.object({ name: z.string() })).default([]),
   requested_reviewers: z.array(z.object({ login: z.string() })).default([]),
   base: z.object({ ref: z.string() }),
-  head: z.object({ sha: z.string() }),
+  head: z.object({ sha: z.string(), ref: z.string() }),
 });
 
 const rawPr = rawPrListItem.extend({
@@ -274,6 +274,7 @@ export class GitHubClient {
       labels: p.labels.map((l) => l.name),
       requestedReviewers: p.requested_reviewers.map((r) => r.login),
       baseBranch: p.base.ref,
+      headBranch: truncate(p.head.ref, 200),
       headSha: p.head.sha,
       sourceUrl: p.html_url,
     };
