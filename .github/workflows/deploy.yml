@@ -8,6 +8,11 @@ on:
     types: [completed]
     branches: [main]
   workflow_dispatch:
+    inputs:
+      simulate_failure:
+        description: "Test the rollback: deploy, then force the health check to fail"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -45,7 +50,13 @@ jobs:
         run: flyctl deploy --remote-only --app "$FLY_APP"
 
       - name: Health check
+        env:
+          SIMULATE_FAILURE: ${{ inputs.simulate_failure }}
         run: |
+          if [ "$SIMULATE_FAILURE" = "true" ]; then
+            echo "Simulated failure requested (rollback test): failing the health check on purpose."
+            exit 1
+          fi
           for i in $(seq 1 12); do
             if curl -fsS "https://$FLY_APP.fly.dev/healthz"; then
               echo; echo "Healthy after attempt $i"; exit 0
