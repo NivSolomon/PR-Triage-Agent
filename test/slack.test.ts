@@ -1,10 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   APPROVE_ACTION,
+  EDIT_ACTION,
+  EDIT_VIEW,
   REJECT_ACTION,
   SlackChannel,
   approvalBlocks,
   decidedBlocks,
+  editModal,
   explainSlackError,
   slackActor,
   slackSafe,
@@ -19,6 +22,7 @@ const record = (over: Partial<ActionRecord> = {}): ActionRecord => ({
   prTitle: "Fix login",
   prUrl: "https://github.com/acme/app/pull/7",
   body: "Please fix CI",
+  originalBody: null,
   status: "pending",
   requestedBy: "slack:U0ASKER",
   requestedVia: "slack",
@@ -39,10 +43,11 @@ interface Post {
 }
 
 function setup(
-  over: { githubUsers?: Record<string, string>; allowed?: string[]; approvers?: string[]; allowAll?: boolean; ask?: () => Promise<unknown>; approvals?: object } = {},
+  over: { githubUsers?: Record<string, string>; allowed?: string[]; approvers?: string[]; allowAll?: boolean; teamId?: string; ask?: () => Promise<unknown>; approvals?: object } = {},
 ) {
   const posts: Post[] = [];
   const removed: Array<[string, string]> = [];
+  const homes: Array<{ userId: string; blocks: unknown[] }> = [];
   let n = 0;
   const api: SlackApi = {
     post: vi.fn(async (channel, text, opts) => {
@@ -50,6 +55,8 @@ function setup(
       return `ts${++n}`;
     }),
     remove: vi.fn(async (channel, ts) => void removed.push([channel, ts])),
+    publishHome: vi.fn(async (userId, blocks) => void homes.push({ userId, blocks })),
+    update: vi.fn(async () => undefined),
   };
   const agent = {
     ask: vi.fn(over.ask ?? (async () => ({ text: "Review #7 first.", proposed: [] as ActionRecord[] }))),
@@ -73,6 +80,7 @@ function setup(
     appToken: "xapp-test",
     allowedIds: over.allowed ?? ["U0ALICE"],
     allowAllMembers: over.allowAll,
+    teamId: over.teamId,
     approverIds: over.approvers ?? ["U0BOSS"],
     githubUsers: over.githubUsers,
     agent: agent as never,
@@ -81,7 +89,7 @@ function setup(
     budget: budget as never,
     api,
   });
-  return { channel, api, posts, removed, agent, approvals: approvals as Record<string, ReturnType<typeof vi.fn>>, github };
+  return { channel, api, posts, removed, homes, budget, agent, approvals: approvals as Record<string, ReturnType<typeof vi.fn>>, github };
 }
 
 describe("slackSafe", () => {
@@ -101,7 +109,7 @@ describe("approvalBlocks", () => {
   it("offers Approve (with a confirmation) and Reject, both carrying only the request id", () => {
     const blocks = approvalBlocks(record());
     const actions = blocks.find((b) => b.type === "actions") as unknown as { elements: Array<Record<string, unknown>> };
-    expect(actions.elements.map((e) => e.action_id)).toEqual([APPROVE_ACTION, REJECT_ACTION]);
+    expect(actions.elements.map((e) => e.action_id)).toEqual([APPROVE_ACTION, EDIT_ACTION, REJECT_ACTION]);
     expect(actions.elements.every((e) => e.value === record().id)).toBe(true);
     expect(actions.elements[0]).toHaveProperty("confirm");
   });
@@ -189,6 +197,20 @@ describe("/triage commands", () => {
     expect((await run(s, "U0ALICE", "help")).join()).toMatch(/\/triage queue/);
   });
 
+  it("help spells out what the person may and may not do, and differs for an approver", async () => {
+    const s = setup();
+    const member = (await run(s, "U0ALICE", "help")).join("\n");
+    expect(member).toMatch(/cannot approve/i);
+    expect(member).toMatch(/never posts, merges, closes, approves or edits/i);
+    expect(member).not.toMatch(/You are an APPROVER/);
+
+    const boss = (await run(s, "U0BOSS", "help")).join("\n");
+    expect(boss).toMatch(/You are an APPROVER/);
+    expect(boss).toMatch(/approve or reject a comment request/i);
+    // Help is plain text: Slack would show Markdown as raw symbols.
+    expect(member).not.toMatch(/\*\*/);
+  });
+
   it("queue is deterministic: it reads GitHub and uses no model", async () => {
     const s = setup();
     const replies = await run(s, "U0ALICE", "queue");
@@ -268,6 +290,27 @@ describe("direct messages and mentions", () => {
       // The asker is passed on as an ordinary Slack actor; approving is decided by the approval service, not by chat access.
       await s.channel.handleMessage({ userId: "U0TESTER", channel: "D0X", text: "leave a comment on #7" });
       expect(s.agent.ask).toHaveBeenCalledWith(expect.objectContaining({ actor: "slack:U0TESTER" }));
+    });
+
+    it("refuses people Slack says belong to another workspace (Slack Connect), but not our own", async () => {
+      const s = setup({ allowAll: true, teamId: "T0HOME" });
+      await s.channel.handleMessage({ userId: "U0OUTSIDER", teamId: "T0OTHER", channel: "C0TEAM", text: "hi" });
+      expect(s.agent.ask).not.toHaveBeenCalled();
+      expect(s.posts[0]?.text).toMatch(/not on the access list/);
+
+      const replies: string[] = [];
+      await s.channel.handleCommand({ userId: "U0OUTSIDER", teamId: "T0OTHER", text: "what is blocking #7?", reply: async (t) => void replies.push(t) });
+      expect(s.agent.ask).not.toHaveBeenCalled();
+      expect(replies.join()).toMatch(/not on the access list/);
+
+      await s.channel.handleMessage({ userId: "U0TESTER", teamId: "T0HOME", channel: "D0X", text: "hi" });
+      expect(s.agent.ask).toHaveBeenCalledTimes(1);
+    });
+
+    it("still lets someone named on the list in, wherever they come from", async () => {
+      const s = setup({ allowAll: true, teamId: "T0HOME", allowed: ["U0PARTNER"] });
+      await s.channel.handleMessage({ userId: "U0PARTNER", teamId: "T0OTHER", channel: "C0TEAM", text: "hi" });
+      expect(s.agent.ask).toHaveBeenCalledTimes(1);
     });
 
     it("is off by default: a stranger is still turned away", async () => {
@@ -424,5 +467,169 @@ describe("explainSlackError", () => {
     expect(explainSlackError(platformError("invalid_auth"), "SLACK_BOT_TOKEN")).toMatch(/rejected by Slack/);
     expect(explainSlackError(platformError("ratelimited"), "SLACK_APP_TOKEN")).toBe("SLACK_APP_TOKEN: ratelimited");
     expect(explainSlackError(new Error("socket hang up"), "SLACK_APP_TOKEN")).toMatch(/socket hang up/);
+  });
+});
+
+describe("Home tab", () => {
+  const allText = (blocks: unknown[]): string =>
+    JSON.stringify(blocks, (_k, v) => v).replace(/\\n/g, "\n");
+
+  it("shows the guide to someone on the access list, with live numbers and no model call", async () => {
+    const s = setup();
+    await s.channel.handleHomeOpened("U0ALICE");
+    expect(s.homes).toHaveLength(1);
+    expect(s.homes[0]?.userId).toBe("U0ALICE");
+    const text = allText(s.homes[0]?.blocks ?? []);
+    expect(text).toContain("acme/app");
+    expect(text).toContain("/triage queue");
+    expect(text).toContain("AI budget mode: normal");
+    expect(text).toContain("Requests waiting for approval: 0");
+    expect(s.agent.ask).not.toHaveBeenCalled();
+  });
+
+  it("tells an approver they can approve, and a requester they cannot", async () => {
+    const s = setup();
+    await s.channel.handleHomeOpened("U0BOSS");
+    await s.channel.handleHomeOpened("U0ALICE");
+    expect(allText(s.homes[0]?.blocks ?? [])).toContain("You are an APPROVER");
+    expect(allText(s.homes[1]?.blocks ?? [])).toContain("you cannot approve");
+  });
+
+  it("turns away a stranger on the Home tab too, giving them their member id", async () => {
+    const s = setup();
+    await s.channel.handleHomeOpened("U0STRANGER");
+    const text = allText(s.homes[0]?.blocks ?? []);
+    expect(text).toContain("not on the access list");
+    expect(text).toContain("U0STRANGER");
+    expect(text).not.toContain("/triage queue");
+  });
+
+  it("still shows the guide if the live numbers cannot be read", async () => {
+    const s = setup();
+    (s.budget.summary as ReturnType<typeof vi.fn>).mockImplementation(() => {
+      throw new Error("db locked");
+    });
+    await s.channel.handleHomeOpened("U0ALICE");
+    const text = allText(s.homes[0]?.blocks ?? []);
+    expect(text).toContain("How to talk to me");
+    expect(text).not.toContain("AI budget mode");
+  });
+});
+
+describe("editing the comment before posting (Slack)", () => {
+  const sectionText = (blocks: unknown[]): string =>
+    (blocks as Array<{ type: string; text?: { text: string } }>).filter((b) => b.type === "section").map((b) => b.text?.text ?? "").join("\n");
+
+  it("the card has an Edit button next to Approve and Reject, carrying only the request id", () => {
+    const actions = approvalBlocks(record()).find((b) => b.type === "actions") as unknown as { elements: Array<Record<string, unknown>> };
+    expect(actions.elements.map((e) => e.action_id)).toEqual([APPROVE_ACTION, EDIT_ACTION, REJECT_ACTION]);
+    expect(actions.elements.every((e) => e.value === record().id)).toBe(true);
+  });
+
+  it("the pop-up is prefilled with the current text, limited in length, and says that submitting posts it", () => {
+    const view = editModal(record({ body: "Please fix CI" }), { channel: "D1", ts: "1.2" });
+    expect(view.callback_id).toBe(EDIT_VIEW);
+    expect((view.submit as { text: string }).text).toBe("Post this comment");
+    const input = (view.blocks.find((b) => b.type === "input") as unknown as { element: Record<string, unknown> }).element;
+    expect(input).toMatchObject({ initial_value: "Please fix CI", max_length: 2000, multiline: true });
+    expect(JSON.parse(view.private_metadata ?? "{}")).toEqual({ id: record().id, channel: "D1", ts: "1.2" });
+  });
+
+  it("an edited card shows the original draft, escaped, so the audit trail is visible on the card too", () => {
+    const text = sectionText(approvalBlocks(record({ body: "New wording", originalBody: "Old <!channel> wording" })));
+    expect(text).toContain("Edited by the approver");
+    expect(text).toContain("Old &lt;!channel&gt; wording");
+    expect(text).not.toContain("<!channel>");
+    expect(sectionText(approvalBlocks(record()))).not.toContain("Edited by the approver");
+  });
+
+  const open = async (s: ReturnType<typeof setup>, userId: string) => {
+    const opened: unknown[] = [];
+    const notices: string[] = [];
+    await s.channel.handleEditClick({
+      userId,
+      id: record().id,
+      channel: "D1",
+      ts: "1.2",
+      open: async (v) => void opened.push(v),
+      notice: async (t) => void notices.push(t),
+    });
+    return { opened, notices };
+  };
+
+  it("opens the pop-up for an approver on a pending request", async () => {
+    const s = setup({ approvals: { approve: vi.fn(), reject: vi.fn(), listPending: vi.fn(() => []), get: vi.fn(() => record()) } });
+    const { opened, notices } = await open(s, "U0BOSS");
+    expect(opened).toHaveLength(1);
+    expect(notices).toHaveLength(0);
+  });
+
+  it("does not open it for someone who cannot approve", async () => {
+    const get = vi.fn(() => record());
+    const s = setup({ approvals: { approve: vi.fn(), reject: vi.fn(), listPending: vi.fn(() => []), get } });
+    const { opened, notices } = await open(s, "U0ALICE");
+    expect(opened).toHaveLength(0);
+    expect(notices.join()).toMatch(/Only approvers/);
+    expect(get).not.toHaveBeenCalled();
+  });
+
+  it("does not open it for a request that is already decided or gone, and says why", async () => {
+    const decided = setup({ approvals: { approve: vi.fn(), reject: vi.fn(), listPending: vi.fn(() => []), get: vi.fn(() => record({ status: "rejected" })) } });
+    const a = await open(decided, "U0BOSS");
+    expect(a.opened).toHaveLength(0);
+    expect(a.notices.join()).toMatch(/Rejected/);
+    const gone = setup({ approvals: { approve: vi.fn(), reject: vi.fn(), listPending: vi.fn(() => []), get: vi.fn(() => null) } });
+    const b = await open(gone, "U0BOSS");
+    expect(b.opened).toHaveLength(0);
+    expect(b.notices.join()).toMatch(/can't find/);
+  });
+
+  const submit = async (s: ReturnType<typeof setup>, userId: string, editedBody: string) => {
+    const finished: Array<[string, ActionRecord | undefined]> = [];
+    const notices: string[] = [];
+    await s.channel.handleDecision({
+      userId,
+      kind: "approve",
+      id: record().id,
+      editedBody,
+      finish: async (outcome, rec) => void finished.push([outcome, rec]),
+      notice: async (t) => void notices.push(t),
+    });
+    return { finished, notices };
+  };
+
+  it("submitting the pop-up approves as that person with their text, and the outcome says it was edited", async () => {
+    const edited = record({ status: "executed", body: "New wording", originalBody: "Please fix CI", resultUrl: "https://github.com/acme/app/pull/7#c1" });
+    const approvals = { approve: vi.fn(async () => edited), reject: vi.fn(), listPending: vi.fn(() => []) };
+    const s = setup({ approvals });
+    const { finished } = await submit(s, "U0BOSS", "New wording");
+    expect(approvals.approve).toHaveBeenCalledWith(record().id, "slack:U0BOSS", { editedBody: "New wording" });
+    expect(finished[0]?.[0]).toMatch(/Posted your edited comment on #7/);
+    expect(finished[0]?.[1]).toMatchObject({ body: "New wording", originalBody: "Please fix CI" });
+  });
+
+  it("a non-approver who somehow submits changes nothing", async () => {
+    const approvals = { approve: vi.fn(), reject: vi.fn(), listPending: vi.fn(() => []) };
+    const s = setup({ approvals });
+    const { finished, notices } = await submit(s, "U0ALICE", "Sneaky");
+    expect(approvals.approve).not.toHaveBeenCalled();
+    expect(finished).toHaveLength(0);
+    expect(notices.join()).toMatch(/Only approvers/);
+  });
+
+  it("if someone else decided first, the editor is told privately and the card is left alone", async () => {
+    const { ApprovalError } = await import("../src/approvals/service.js");
+    const approvals = {
+      approve: vi.fn(async () => {
+        throw new ApprovalError("not_pending", "This action is already executed; it was not run again.");
+      }),
+      reject: vi.fn(),
+      listPending: vi.fn(() => []),
+    };
+    const s = setup({ approvals });
+    const { finished } = await submit(s, "U0BOSS", "Late edit");
+    // No record comes back, which is what makes the pop-up handler send a private message instead of editing the card.
+    expect(finished[0]?.[0]).toMatch(/already executed/);
+    expect(finished[0]?.[1]).toBeUndefined();
   });
 });

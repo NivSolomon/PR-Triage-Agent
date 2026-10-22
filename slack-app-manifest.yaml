@@ -3,10 +3,19 @@
 display_information:
   name: PR Triage Agent
   description: Ranks open pull requests with reasons and confidence. Posts a comment only after a human approves it.
+  # Shown on the app's About tab. The full guide is on the Home tab.
+  long_description: >-
+    PR Triage Agent helps your team decide which pull requests to review first, and why. It reads live GitHub data,
+    ranks the open pull requests, and explains each ranking with the facts behind it and a confidence level. If
+    something cannot be known (for example the CI result could not be fetched), it says so instead of guessing.
+    Ask in plain language in the Messages tab (for example: "What should we review first?"), or use /triage queue
+    for the ranked list. It never posts, merges or approves anything by itself: when you ask it to leave a comment,
+    it drafts the exact text and sends it to an approver, and nothing is posted until that person clicks Approve.
+    Open the Home tab for the full guide: what you can do, what nobody can do, how approval works and the limits.
   background_color: "#1f2937"
 features:
   app_home:
-    home_tab_enabled: false
+    home_tab_enabled: true   # the guide
     messages_tab_enabled: true
     messages_tab_read_only_enabled: false
   bot_user:
@@ -31,6 +40,7 @@ settings:
     bot_events:
       - app_mention
       - message.im
+      - app_home_opened     # fill the Home tab with the guide when someone opens it
   interactivity:
     is_enabled: true        # the Approve / Reject buttons
   org_deploy_enabled: false

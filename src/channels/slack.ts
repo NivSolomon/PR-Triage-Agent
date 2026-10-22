@@ -1,13 +1,16 @@
 import { App, LogLevel } from "@slack/bolt";
-import type { KnownBlock } from "@slack/types";
+import type { KnownBlock, ModalView } from "@slack/types";
 import { WebClient } from "@slack/web-api";
-import { renderApprovalCard } from "../approvals/render.js";
+import { renderApprovalCard, renderOutcome } from "../approvals/render.js";
+import { buildGuide, renderGuideText } from "../guide.js";
 import type { ApprovalService } from "../approvals/service.js";
 import type { Agent } from "../agent/agent.js";
 import type { BudgetService } from "../budget/service.js";
 import type { GitHubClient } from "../github/client.js";
 import type { ActionRecord } from "../store/actions.js";
 import { renderDigest } from "../scheduler/digest.js";
+import { homeBlocks, homeDeniedBlocks } from "./slackHome.js";
+import { slackSafe } from "./slack-text.js";
 import { buildQueue } from "../triage/queue.js";
 import { decide, renderBudget, renderQueue, splitMessage } from "./shared.js";
 import type { DecisionKind } from "./shared.js";
@@ -17,23 +20,24 @@ const MESSAGE_MAX = 3500;
 
 export const APPROVE_ACTION = "decision_approve";
 export const REJECT_ACTION = "decision_reject";
+export const EDIT_ACTION = "decision_edit";
+/** callback_id of the pop-up where an approver corrects the comment before posting it. */
+export const EDIT_VIEW = "edit_comment";
+const COMMENT_MAX = 2000;
 
 export const slackActor = (userId: string): string => `slack:${userId}`;
 
-/**
- * Make text safe to send as a Slack message. PR titles and comments are written by strangers,
- * and in Slack `<!channel>`, `<@U123>` and `<https://evil|Click here>` are live control sequences.
- * Escaping & < > (as Slack documents) turns all of them into harmless literal text.
- */
-export function slackSafe(text: string): string {
-  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}
+export { slackSafe };
 
 /** The only Slack calls the channel needs. Small on purpose, so tests can fake it. */
 export interface SlackApi {
   /** `channel` may be a channel id or a user id (a user id posts into that person's DM with the app). */
   post(channel: string, text: string, opts?: { threadTs?: string; blocks?: KnownBlock[] }): Promise<string | undefined>;
   remove(channel: string, ts: string): Promise<void>;
+  /** Replace the contents of the app's Home tab for one person. */
+  publishHome(userId: string, blocks: KnownBlock[]): Promise<void>;
+  /** Replace an earlier message (for example an approval card, once it has been decided). */
+  update(channel: string, ts: string, text: string, blocks: KnownBlock[]): Promise<void>;
 }
 
 /** Posts through Slack's Web API with formatting and link previews switched off. */
@@ -69,6 +73,14 @@ class BoltSlackApi implements SlackApi {
 
   async remove(channel: string, ts: string): Promise<void> {
     await this.client.chat.delete({ channel, ts });
+  }
+
+  async update(channel: string, ts: string, text: string, blocks: KnownBlock[]): Promise<void> {
+    await this.client.chat.update({ channel, ts, text: slackSafe(text), blocks });
+  }
+
+  async publishHome(userId: string, blocks: KnownBlock[]): Promise<void> {
+    await this.client.views.publish({ user_id: userId, view: { type: "home", blocks } });
   }
 }
 
@@ -127,6 +139,12 @@ export function approvalBlocks(a: ActionRecord): KnownBlock[] {
   const bodyBlocks = escapedChunks(neutralizeFences(a.body), 2600).map((chunk, i) =>
     mrkdwn(`${i === 0 ? "*Exact comment text:*" : "*...continued:*"}\n\`\`\`${chunk}\`\`\``),
   );
+  // After an approver edited the text, the card keeps the draft it replaced.
+  const originalBlocks = a.originalBody
+    ? escapedChunks(neutralizeFences(a.originalBody), 2600).map((chunk, i) =>
+        mrkdwn(`${i === 0 ? "*Edited by the approver. The original draft was:*" : "*...continued:*"}\n\`\`\`${chunk}\`\`\``),
+      )
+    : [];
   const tail = [
     `*Why the agent suggests it:* ${slackSafe((a.reason || "(no reason given)").slice(0, 1200))}`,
     `*Requested by* ${slackSafe(a.requestedBy)} via ${slackSafe(a.requestedVia)}`,
@@ -137,6 +155,7 @@ export function approvalBlocks(a: ActionRecord): KnownBlock[] {
   return [
     mrkdwn(head),
     ...bodyBlocks,
+    ...originalBlocks,
     mrkdwn(tail),
     {
       type: "actions",
@@ -157,6 +176,12 @@ export function approvalBlocks(a: ActionRecord): KnownBlock[] {
         },
         {
           type: "button",
+          action_id: EDIT_ACTION,
+          value: a.id,
+          text: { type: "plain_text", text: "Edit text" },
+        },
+        {
+          type: "button",
           action_id: REJECT_ACTION,
           style: "danger",
           value: a.id,
@@ -165,6 +190,46 @@ export function approvalBlocks(a: ActionRecord): KnownBlock[] {
       ],
     },
   ];
+}
+
+/**
+ * The pop-up for correcting a comment. The approver sees the current text, changes it, and submits to post it.
+ * The submit button says what it does, because submitting IS the approval. `card` says which message to
+ * update afterwards.
+ */
+export function editModal(a: ActionRecord, card: { channel?: string; ts?: string }): ModalView {
+  return {
+    type: "modal",
+    callback_id: EDIT_VIEW,
+    private_metadata: JSON.stringify({ id: a.id, channel: card.channel, ts: card.ts }),
+    title: { type: "plain_text", text: "Edit comment" },
+    submit: { type: "plain_text", text: "Post this comment" },
+    close: { type: "plain_text", text: "Cancel" },
+    blocks: [
+      mrkdwn(`Comment on pull request #${a.prNumber}: *${slackSafe(a.prTitle).slice(0, 200)}*`),
+      {
+        type: "input",
+        block_id: "body",
+        label: { type: "plain_text", text: "Exact text to post" },
+        element: {
+          type: "plain_text_input",
+          action_id: "text",
+          multiline: true,
+          initial_value: a.body.slice(0, COMMENT_MAX),
+          max_length: COMMENT_MAX,
+        },
+      },
+      {
+        type: "context",
+        elements: [
+          {
+            type: "mrkdwn",
+            text: "Your text replaces the draft and is posted exactly as written. The original draft stays in the history.",
+          },
+        ],
+      },
+    ],
+  };
 }
 
 /** The same card after a decision: the buttons are replaced by the outcome. */
@@ -193,23 +258,31 @@ export function explainSlackError(err: unknown, token: "SLACK_APP_TOKEN" | "SLAC
   return `${token}: ${code}`;
 }
 
-const HELP = [
-  "I help your team decide which pull requests to review first, using live GitHub data.",
-  "",
-  "The best way to talk to me is to message me directly (the app's Messages tab): your questions and my answers stay in the conversation. In a channel, @mention me and I reply in a thread.",
-  "Examples:",
-  "- What should we review first?",
-  "- Why is #12 blocked?",
-  "- Leave a comment on #12 asking the author to fix CI (an approver must approve it first)",
-  "",
-  "Quick commands (replies are private to you and temporary):",
-  "/triage queue - ranked review queue (no AI credit used)",
-  "/triage pending - actions waiting for approval",
-  "/triage digest - the morning digest, on demand",
-  "/triage budget - AI budget status",
-  "/triage <question> - ask without opening the conversation",
-  "/triage help - this message",
-].join("\n");
+/**
+ * The help message. The part about what you may and may not do depends on who is asking
+ * (an approver or not) and comes from the same guide as the web page.
+ */
+export function helpText(isApprover: boolean): string {
+  return [
+    "I help your team decide which pull requests to review first, using live GitHub data.",
+    "",
+    renderGuideText(buildGuide(isApprover ? "approver" : "requester", { channel: "slack" })),
+    "",
+    "How to talk to me: message me directly (the app's Messages tab) and your questions and my answers stay in the conversation. In a channel, @mention me and I reply in a thread.",
+    "Examples:",
+    "- What should we review first?",
+    "- Why is #12 blocked?",
+    "- Leave a comment on #12 asking the author to fix CI (an approver must approve it first)",
+    "",
+    "Quick commands (replies are private to you and temporary):",
+    "/triage queue - ranked review queue (no AI credit used)",
+    "/triage pending - actions waiting for approval",
+    "/triage digest - the morning digest, on demand",
+    "/triage budget - AI budget status",
+    "/triage <question> - ask without opening the conversation",
+    "/triage help - this message",
+  ].join("\n");
+}
 
 export interface SlackDeps {
   botToken: string;
@@ -231,6 +304,8 @@ export interface SlackDeps {
   budget: BudgetService;
   /** Tests inject a fake. In production this is created from the Bolt client on start. */
   api?: SlackApi;
+  /** Our workspace id (T...). Normally learned from Slack on start; tests set it. */
+  teamId?: string;
 }
 
 /** Everything the rest of the app needs from the chat channel. */
@@ -238,12 +313,15 @@ export class SlackChannel {
   private app: App | undefined;
   private api: SlackApi | undefined;
   private botUserId: string | undefined;
+  /** The workspace this app is installed in (learned from Slack on start). */
+  private homeTeam: string | undefined;
   private readonly allowed: Set<string>;
   private readonly approvers: Set<string>;
   private readonly busy = new Set<string>();
 
   constructor(private readonly d: SlackDeps) {
     this.api = d.api;
+    this.homeTeam = d.teamId;
     this.approvers = new Set(d.approverIds);
     this.allowed = new Set([...d.allowedIds, ...d.approverIds]);
   }
@@ -265,8 +343,13 @@ export class SlackChannel {
     "Tip: your Slack account is not linked to a GitHub login, so this list is not personal. Ask the admin to add <your member id>:<your GitHub login> to SLACK_GITHUB_USERS.";
 
   /** May this person talk to the agent? Never implies approval rights (see `isApprover`). */
-  private canChat(userId: string): boolean {
-    return this.d.allowAllMembers === true || this.allowed.has(userId);
+  private canChat(userId: string, teamId?: string): boolean {
+    if (this.allowed.has(userId)) return true;
+    if (this.d.allowAllMembers !== true) return false;
+    // Slack Connect lets people from OTHER workspaces mention the app in a shared channel. "Everyone" means
+    // everyone in OUR workspace, so a message that Slack says came from another workspace is refused.
+    if (this.homeTeam && teamId && teamId !== this.homeTeam) return false;
+    return true;
   }
 
   private requireApi(): SlackApi {
@@ -318,18 +401,18 @@ export class SlackChannel {
   }
 
   /** `/triage <text>`. `reply` answers privately to the person who typed it. */
-  async handleCommand(p: { userId: string; text: string; reply: (text: string) => Promise<void> }): Promise<void> {
+  async handleCommand(p: { userId: string; teamId?: string; text: string; reply: (text: string) => Promise<void> }): Promise<void> {
     const say = async (text: string): Promise<void> => {
       for (const part of splitMessage(text, MESSAGE_MAX)) await p.reply(part);
     };
-    if (!this.canChat(p.userId)) return say(this.deny(p.userId));
+    if (!this.canChat(p.userId, p.teamId)) return say(this.deny(p.userId));
 
     const [head = "", ...rest] = p.text.trim().split(/\s+/);
     const word = head.toLowerCase();
     // "/triage queue" is a command; "/triage queue what is blocking #3?" is a question.
     const isCommand = rest.length === 0;
 
-    if (isCommand && (word === "" || word === "help")) return say(HELP);
+    if (isCommand && (word === "" || word === "help")) return say(helpText(this.approvers.has(p.userId)));
     if (isCommand && word === "queue") return this.guarded(p.userId, say, async () => {
       try {
         const login = this.githubLogin(p.userId);
@@ -367,16 +450,16 @@ export class SlackChannel {
   }
 
   /** A direct message to the app, or an @mention in a channel. Answers in the same place (a thread in channels). */
-  async handleMessage(p: { userId: string; channel: string; threadTs?: string; text: string }): Promise<void> {
+  async handleMessage(p: { userId: string; teamId?: string; channel: string; threadTs?: string; text: string }): Promise<void> {
     const api = this.requireApi();
     const opts = p.threadTs ? { threadTs: p.threadTs } : {};
     const post = async (text: string): Promise<void> => {
       for (const part of splitMessage(text, MESSAGE_MAX)) await api.post(p.channel, part, opts);
     };
-    if (!this.canChat(p.userId)) return post(this.deny(p.userId));
+    if (!this.canChat(p.userId, p.teamId)) return post(this.deny(p.userId));
 
     const text = this.stripMention(p.text);
-    if (text === "" || /^help$/i.test(text)) return post(HELP);
+    if (text === "" || /^help$/i.test(text)) return post(helpText(this.approvers.has(p.userId)));
 
     // A visible "working" note, replaced by the answer. Failing to show it must never block the answer.
     let placeholder: string | undefined;
@@ -405,6 +488,25 @@ export class SlackChannel {
   }
 
   /**
+   * A click on Edit: open the pop-up with the current text. Only approvers may; everyone else, and anything
+   * already decided, gets a plain message and no pop-up. (The real permission check is in ApprovalService.)
+   */
+  async handleEditClick(p: {
+    userId: string;
+    id: string;
+    channel?: string;
+    ts?: string;
+    open: (view: ModalView) => Promise<void>;
+    notice: (text: string) => Promise<void>;
+  }): Promise<void> {
+    if (!this.isApprover(slackActor(p.userId))) return p.notice("Only approvers can do that.");
+    const record = this.d.approvals.get(p.id);
+    if (!record) return p.notice("I can't find that request any more.");
+    if (record.status !== "pending") return p.notice(renderOutcome(record));
+    await p.open(editModal(record, { channel: p.channel, ts: p.ts }));
+  }
+
+  /**
    * A click on Approve or Reject. `finish` shows the outcome on the card (and removes the buttons);
    * `notice` is a private message to the clicker.
    */
@@ -412,16 +514,18 @@ export class SlackChannel {
     userId: string;
     kind: DecisionKind;
     id: string;
-    finish: (outcome: string) => Promise<void>;
+    /** Approve only: the approver corrected the text in the pop-up. */
+    editedBody?: string;
+    finish: (outcome: string, record?: ActionRecord) => Promise<void>;
     notice: (text: string) => Promise<void>;
   }): Promise<void> {
     const actor = slackActor(p.userId);
     // The ONLY check that matters is inside ApprovalService; this is just a friendlier early answer.
     if (!this.isApprover(actor)) return p.notice("Only approvers can do that.");
 
-    const result = await decide(this.d.approvals, p.kind, p.id, actor);
+    const result = await decide(this.d.approvals, p.kind, p.id, actor, p.editedBody);
     try {
-      await p.finish(result.text);
+      await p.finish(result.text, result.record);
     } catch {
       await p.notice(result.text);
     }
@@ -431,6 +535,29 @@ export class SlackChannel {
     if (requester?.startsWith("slack:") && requester !== actor) {
       await this.send(requester.replace("slack:", ""), `Your request #${p.id.slice(0, 8)}: ${result.text}`).catch(() => undefined);
     }
+  }
+
+  /** Someone opened the app's Home tab: show them the guide (or how to get access). */
+  async handleHomeOpened(userId: string): Promise<void> {
+    const api = this.requireApi();
+    if (!this.canChat(userId)) return api.publishHome(userId, homeDeniedBlocks(userId));
+    let budgetLevel: string | undefined;
+    let pending: number | undefined;
+    try {
+      budgetLevel = this.d.budget.summary().level;
+      pending = this.d.approvals.listPending().length;
+    } catch {
+      // The guide is useful without the live numbers.
+    }
+    await api.publishHome(
+      userId,
+      homeBlocks({
+        repo: this.d.github.repo,
+        audience: this.isApprover(slackActor(userId)) ? "approver" : "requester",
+        budgetLevel,
+        pending,
+      }),
+    );
   }
 
   // ---------------------------------------------------------------- internals
@@ -542,6 +669,7 @@ export class SlackChannel {
       await ack(); // Slack needs an answer within 3 seconds; the work happens after.
       void this.handleCommand({
         userId: command.user_id,
+        teamId: command.team_id,
         text: command.text,
         reply: async (text) => {
           await respond({ response_type: "ephemeral", text: slackSafe(text), mrkdwn: false });
@@ -553,17 +681,25 @@ export class SlackChannel {
       if (!event.user) return;
       void this.handleMessage({
         userId: event.user,
+        teamId: (event as { user_team?: string }).user_team,
         channel: event.channel,
         threadTs: event.thread_ts ?? event.ts,
         text: event.text,
       }).catch((err) => console.error("Slack mention failed:", err instanceof Error ? err.message : err));
     });
 
+    app.event("app_home_opened", async ({ event }) => {
+      if (event.tab !== "home") return; // the Messages tab is the conversation itself
+      void this.handleHomeOpened(event.user).catch((err) =>
+        console.error("Slack home tab failed:", err instanceof Error ? err.message : err),
+      );
+    });
+
     app.message(async ({ message }) => {
-      const m = message as { user?: string; text?: string; channel: string; channel_type?: string; subtype?: string; bot_id?: string };
+      const m = message as { user?: string; user_team?: string; text?: string; channel: string; channel_type?: string; subtype?: string; bot_id?: string };
       // Only direct messages from people (never our own or other bots' messages, edits, joins...).
       if (m.channel_type !== "im" || m.subtype || m.bot_id || !m.user || !m.text) return;
-      void this.handleMessage({ userId: m.user, channel: m.channel, text: m.text }).catch((err) =>
+      void this.handleMessage({ userId: m.user, teamId: m.user_team, channel: m.channel, text: m.text }).catch((err) =>
         console.error("Slack message failed:", err instanceof Error ? err.message : err),
       );
     });
@@ -595,6 +731,62 @@ export class SlackChannel {
           },
         }).catch((err) => console.error("Slack decision failed:", err instanceof Error ? err.message : err));
       };
+    app.action(EDIT_ACTION, (async ({ ack, body, action, client }: {
+      ack: () => Promise<void>;
+      client: WebClient;
+      body: { user: { id: string }; trigger_id: string; channel?: { id: string }; container?: { channel_id?: string; message_ts?: string }; message?: { ts?: string } };
+      action: { value?: string };
+    }): Promise<void> => {
+      await ack();
+      if (!action.value) return;
+      void this.handleEditClick({
+        userId: body.user.id,
+        id: action.value,
+        channel: body.container?.channel_id ?? body.channel?.id,
+        ts: body.container?.message_ts ?? body.message?.ts,
+        open: async (view) => {
+          await client.views.open({ trigger_id: body.trigger_id, view });
+        },
+        notice: async (text) => {
+          await this.requireApi().post(body.user.id, text);
+        },
+      }).catch((err) => console.error("Slack edit failed:", err instanceof Error ? err.message : err));
+    }) as never);
+
+    // The pop-up was submitted: that is the approval, with the approver's own text.
+    app.view(EDIT_VIEW, async ({ ack, body, view }) => {
+      const text = (view.state.values["body"]?.["text"]?.value ?? "").trim();
+      if (!text || text.length > COMMENT_MAX) {
+        await ack({
+          response_action: "errors",
+          errors: { body: text ? `Please keep it under ${COMMENT_MAX} characters.` : "The comment cannot be empty." },
+        });
+        return;
+      }
+      await ack();
+      let meta: { id?: string; channel?: string; ts?: string } = {};
+      try {
+        meta = JSON.parse(view.private_metadata) as typeof meta;
+      } catch {
+        return;
+      }
+      if (!meta.id) return;
+      void this.handleDecision({
+        userId: body.user.id,
+        kind: "approve",
+        id: meta.id,
+        editedBody: text,
+        finish: async (outcome, record) => {
+          // Without the card or the decided record, fall back to a private message (see handleDecision).
+          if (!record || !meta.channel || !meta.ts) throw new Error("card unknown");
+          await this.requireApi().update(meta.channel, meta.ts, outcome, decidedBlocks(approvalBlocks(record), outcome));
+        },
+        notice: async (t) => {
+          await this.requireApi().post(body.user.id, t);
+        },
+      }).catch((err) => console.error("Slack edit decision failed:", err instanceof Error ? err.message : err));
+    });
+
     app.action(APPROVE_ACTION, onClick("approve") as never);
     app.action(REJECT_ACTION, onClick("reject") as never);
 
@@ -604,6 +796,7 @@ export class SlackChannel {
       await app.start();
       const me = await app.client.auth.test();
       this.botUserId = me.user_id;
+      this.homeTeam = me.team_id ?? this.homeTeam;
       console.log(`Slack app connected as @${me.user ?? "app"} in workspace ${me.team ?? "?"}`);
     } catch (err) {
       throw new Error(`Could not connect to Slack: ${err instanceof Error ? err.message : String(err)}`);
