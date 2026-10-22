@@ -42,7 +42,9 @@ export const INDEX_HTML = `<!doctype html>
     --me:#6366f1; --me-fg:#ffffff; --shadow:0 1px 2px rgba(0,0,0,.4), 0 4px 14px rgba(0,0,0,.3);
   }
   * { box-sizing: border-box; }
-  body { margin: 0; font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--fg); }
+  /* System fonts only: a web font would need a third-party request, which the page's security policy forbids. */
+  body { margin: 0; font: 15px/1.55 "Inter", "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, "SF Pro Text", Roboto, "Helvetica Neue", Arial, sans-serif; letter-spacing: -0.005em; background: var(--bg); color: var(--fg); -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; font-feature-settings: "cv11", "ss01"; }
+  h1, h2, h4 { letter-spacing: -0.015em; }
   a { color: var(--accent); text-decoration: none; }
   a:hover { text-decoration: underline; }
   .hidden { display: none !important; }
@@ -55,6 +57,7 @@ export const INDEX_HTML = `<!doctype html>
   .logo { width: 30px; height: 30px; border-radius: 8px; background: var(--accent); color: var(--accent-fg); display: grid; place-items: center; font-size: 15px; }
   .spacer { flex: 1; }
   .chip { display: inline-flex; align-items: center; gap: 6px; padding: 2px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; background: var(--neutral-bg); color: var(--neutral); white-space: nowrap; }
+  #queueMeta.stale { color: var(--warn); font-weight: 600; }
   .chip.ok { background: var(--ok-bg); color: var(--ok); }
   .chip.warn { background: var(--warn-bg); color: var(--warn); }
   .chip.bad { background: var(--bad-bg); color: var(--bad); }
@@ -138,9 +141,10 @@ export const INDEX_HTML = `<!doctype html>
   .wf-rows { display: grid; gap: 6px; }
   .wf-row { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(90px, 1fr) 38px; gap: 10px; align-items: center; font-size: 13px; }
   @media (max-width: 560px) { .wf-row { grid-template-columns: minmax(0, 1fr) 70px 34px; } }
-  .wf-label { display: flex; align-items: center; gap: 7px; min-width: 0; }
-  .wf-label span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .wf-label .ic { color: var(--muted); }
+  /* Long signal texts wrap onto more lines instead of being cut off. */
+  .wf-label { display: flex; align-items: flex-start; gap: 7px; min-width: 0; line-height: 1.35; }
+  .wf-label span { min-width: 0; white-space: normal; overflow-wrap: anywhere; }
+  .wf-label .ic { color: var(--muted); margin-top: 2px; }
   .wf-track { position: relative; height: 10px; border-radius: 99px; background: var(--soft); background-image: linear-gradient(var(--line), var(--line)); background-size: 1px 100%; background-position: 50% 0; background-repeat: no-repeat; overflow: hidden; }
   .wf-track i { position: absolute; top: 0; bottom: 0; border-radius: 99px; background: var(--neutral); opacity: .55; }
   .wf-row.pos .wf-track i { background: var(--ok); opacity: 1; }
@@ -246,14 +250,43 @@ export const INDEX_HTML = `<!doctype html>
   .drawer-head h2 { margin: 0; font-size: 16px; }
   .drawer-body { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 12px 16px; }
   .drawer-foot { padding: 12px 16px 14px; border-top: 1px solid var(--line); }
-  .backdrop { display: none; position: fixed; inset: 0; z-index: 25; background: rgba(15,23,42,.45); }
-  @media (max-width: 960px) { .backdrop.open { display: block; } }
+  /* A click anywhere outside the open chat closes it. On a wide screen the page stays undimmed and readable. */
+  .backdrop { display: none; position: fixed; inset: 0; z-index: 25; background: transparent; }
+  .backdrop.open { display: block; }
+  @media (max-width: 960px) { .backdrop.open { background: rgba(15,23,42,.45); } }
   #chat { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; padding: 2px; }
   .chat-empty { margin: auto; text-align: center; color: var(--muted); font-size: 14px; padding: 12px; }
   .chat-empty b { display: block; color: var(--fg); font-size: 16px; margin-bottom: 4px; }
-  .bubble { padding: 9px 12px; border-radius: 14px; white-space: pre-wrap; word-break: break-word; max-width: 92%; }
-  .bubble.me { align-self: flex-end; background: var(--me); color: var(--me-fg); border-bottom-right-radius: 4px; }
-  .bubble.bot { align-self: flex-start; background: var(--soft); border-bottom-left-radius: 4px; }
+  #chat { gap: 14px; padding: 4px 2px 8px; scroll-behavior: smooth; }
+  .msgcol { display: flex; flex-direction: column; gap: 4px; min-width: 0; max-width: calc(100% - 42px); }
+  .msg.me .msgcol { align-items: flex-end; }
+  .bubble { padding: 10px 14px; border-radius: 16px; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 14.5px; line-height: 1.6; }
+  .bubble.me { background: var(--me); color: var(--me-fg); border-bottom-right-radius: 5px; }
+  .bubble.bot { background: var(--soft); border: 1px solid var(--line); border-bottom-left-radius: 5px; white-space: normal; }
+  .bubble.err { background: var(--bad-bg); border-color: transparent; color: var(--bad); }
+  .msg-meta { display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--muted); padding: 0 4px; }
+  .msg-meta button { padding: 2px 6px; font-size: 11.5px; border-color: transparent; background: transparent; color: var(--muted); }
+  .msg-meta button:hover:not(:disabled) { background: var(--soft); color: var(--fg); }
+  .msg-meta .ic { width: 13px; height: 13px; }
+
+  /* formatted answer: paragraphs, lists, key/value rows, link chips */
+  .rich > :first-child { margin-top: 0; }
+  .rich > :last-child { margin-bottom: 0; }
+  .rich p { margin: 0 0 10px; }
+  .rich ul, .rich ol { margin: 4px 0 12px; padding-left: 20px; }
+  .rich li { margin: 6px 0; padding-left: 2px; }
+  .rich li::marker { color: var(--accent); }
+  .rich ul ul { margin: 6px 0 4px; padding-left: 0; list-style: none; display: grid; gap: 5px; }
+  .rich ul ul li { margin: 0; display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; font-size: 13.5px; }
+  .rich ul ul li.kv { display: grid; grid-template-columns: 132px minmax(0, 1fr); gap: 8px; align-items: baseline; }
+  .rich ul ul li.kv > .chip { justify-self: start; }
+  .rich .k { color: var(--muted); font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+  .rich strong { font-weight: 650; }
+  .rich code { font: 12.5px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; padding: 1px 6px; border-radius: 6px; background: var(--neutral-bg); }
+  .rich .prref { font-weight: 650; color: var(--accent); }
+  .rich a.lnk { display: inline-flex; align-items: center; gap: 5px; padding: 1px 9px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); font-size: 12.5px; font-weight: 600; vertical-align: baseline; }
+  .rich a.lnk:hover { text-decoration: none; filter: brightness(1.15); }
+  .rich a.lnk .ic { width: 12px; height: 12px; }
   .typing::after { content: ""; display: inline-block; width: 1.4em; text-align: left; animation: dots 1.2s steps(4) infinite; }
   @keyframes dots { 0% { content: ""; } 25% { content: "."; } 50% { content: ".."; } 75%, 100% { content: "..."; } }
   .suggest { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
@@ -267,8 +300,22 @@ export const INDEX_HTML = `<!doctype html>
   .tabs button.on { background: var(--panel); color: var(--fg); font-weight: 600; box-shadow: var(--shadow); }
   .act { --tone: var(--neutral); border: 1px solid var(--line); border-left: 4px solid var(--tone); border-radius: 12px; padding: 12px 14px; margin-bottom: 10px; }
   .act.t-ok { --tone: var(--ok); } .act.t-warn { --tone: var(--warn); } .act.t-bad { --tone: var(--bad); } .act.t-info { --tone: var(--info); }
-  .act-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; flex-wrap: wrap; }
-  .act-title { font-weight: 600; word-break: break-word; }
+  .act { padding: 0; overflow: hidden; }
+  .act-head { display: flex; align-items: center; gap: 8px; padding: 10px 12px; cursor: pointer; }
+  .act-head:hover { background: var(--soft); }
+  .act.open .chev::before { transform: rotate(45deg); }
+  .act-main { flex: 1; min-width: 0; }
+  .act-title { font-weight: 600; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .act-preview { font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .act.open .act-preview { display: none; }
+  .act.open .act-title { white-space: normal; word-break: break-word; }
+  .act-when { flex: none; font-size: 12px; color: var(--muted); }
+  .act-body { padding: 4px 14px 14px; border-top: 1px solid var(--line); }
+  .act-body > :first-child { margin-top: 10px; }
+  a.btn.plain { max-width: 100%; margin-bottom: 4px; }
+  a.btn.plain span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  button.more { width: 100%; justify-content: center; margin-top: 2px; }
+  @media (max-width: 420px) { .act-when { display: none; } }
   .act-meta { font-size: 12px; color: var(--muted); margin-bottom: 10px; }
   .quote { margin: 0 0 10px; padding: 8px 12px; border-left: 3px solid var(--accent); border-radius: 0 8px 8px 0; background: var(--soft); white-space: pre-wrap; word-break: break-word; font-size: 14px; }
   .quote small { display: block; margin-bottom: 4px; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
@@ -293,6 +340,21 @@ export const INDEX_HTML = `<!doctype html>
   @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
   pre { white-space: pre-wrap; word-break: break-word; margin: 0; padding: 10px; border-radius: 8px; background: var(--soft); font: 12.5px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
   .row { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; align-items: center; }
+
+  /* guide popup: what this key may and may not do, centred over the page */
+  .modal-back { position: fixed; inset: 0; z-index: 60; display: flex; align-items: center; justify-content: center; padding: 16px; background: rgba(15,23,42,.55); }
+  .modal { width: min(640px, 100%); max-height: min(86vh, 800px); display: flex; flex-direction: column; background: var(--panel); color: var(--fg); border: 1px solid var(--line); border-radius: 16px; box-shadow: 0 18px 60px rgba(0,0,0,.35); animation: modal-in .16s ease-out; }
+  @keyframes modal-in { from { opacity: 0; transform: translateY(10px) scale(.98); } to { opacity: 1; transform: none; } }
+  .modal-head { display: flex; align-items: center; gap: 10px; padding: 14px 18px; border-bottom: 1px solid var(--line); }
+  .modal-head h2 { margin: 0; font-size: 17px; display: flex; align-items: center; gap: 8px; }
+  .modal-head h2 .ic { color: var(--accent); }
+  .modal-body { padding: 14px 18px 20px; overflow-y: auto; }
+  .guide-you { padding: 9px 12px; border-radius: 8px; background: var(--info-bg); color: var(--info); font-weight: 600; font-size: 14px; }
+  .guide-you.ok { background: var(--ok-bg); color: var(--ok); }
+  .guide-sec { margin-top: 14px; }
+  .guide-sec h3 { margin: 0 0 6px; font-size: 13px; display: flex; align-items: center; gap: 7px; }
+  .guide-sec.can h3 { color: var(--ok); } .guide-sec.cannot h3 { color: var(--bad); } .guide-sec.rule h3 { color: var(--info); }
+  .guide-sec ul { margin: 0; padding-left: 20px; display: grid; gap: 5px; font-size: 13.5px; }
 </style>
 </head>
 <body>
@@ -306,6 +368,7 @@ export const INDEX_HTML = `<!doctype html>
     <div id="userbar" class="hidden" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
       <span class="budget" id="budget"></span>
       <span class="chip" id="who"></span>
+      <button class="ghost" id="guideBtn" title="What you can and cannot do here">Guide</button>
       <button class="ghost" id="logout">Sign out</button>
     </div>
   </div>
@@ -321,9 +384,9 @@ export const INDEX_HTML = `<!doctype html>
       <li><span class="fi" data-icon="trend"></span><span><b>Explainable ranking</b> Every score shows the signals behind it.</span></li>
       <li><span class="fi" data-icon="shield"></span><span><b>Human in the loop</b> A comment is only posted after an approver says yes.</span></li>
     </ul>
-    <label for="key">Access key</label>
+    <label for="key">Your key</label>
     <div class="pw">
-      <input id="key" type="password" autocomplete="off" placeholder="Paste your access or approver key">
+      <input id="key" type="password" autocomplete="off" placeholder="Paste the key you were given">
       <button type="button" class="ghost small" id="showKey" aria-label="Show or hide the key">Show</button>
     </div>
     <div class="row">
@@ -374,6 +437,7 @@ export const INDEX_HTML = `<!doctype html>
         <h2 data-icon="shield">Approvals</h2>
         <span class="chip warn hidden" id="pendingCount"></span>
         <span class="spacer"></span>
+        <button class="small" id="toggleActs">Expand all</button>
         <button class="ghost" id="refreshActions">Reload</button>
       </div>
       <div class="sec-body">
@@ -410,6 +474,16 @@ export const INDEX_HTML = `<!doctype html>
     <div class="muted" id="chatMsg" style="margin-top:6px">Enter to send, Shift+Enter for a new line, Esc to close.</div>
   </div>
 </aside>
+<div class="modal-back hidden" id="guideModal">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="guideTitle">
+    <div class="modal-head">
+      <h2 id="guideTitle" data-icon="help">What can I do here?</h2>
+      <span class="spacer"></span>
+      <button class="ghost small" id="guideClose" aria-label="Close the guide">Close</button>
+    </div>
+    <div class="modal-body" id="guideBody"><div class="muted">Loading...</div></div>
+  </div>
+</div>
 <div class="toasts" id="toasts" role="status" aria-live="polite"></div>
 <script src="/app.js"></script>
 </body>
@@ -418,7 +492,8 @@ export const INDEX_HTML = `<!doctype html>
 export const APP_JS = `
 (function () {
   var $ = function (id) { return document.getElementById(id); };
-  var key = sessionStorage.getItem("key") || "";
+  /* No key is kept in the page: signing in sets an HttpOnly session cookie that scripts cannot read. */
+  var signedIn = false;
   var role = "";
   var queueData = null;
   var conv = sessionStorage.getItem("conv");
@@ -484,6 +559,7 @@ export const APP_JS = `
     shield: "M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z",
     trend: "M3 3v18h18 M7 14l4-4 4 4 5-6",
     coin: "M12 1v22 M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6",
+    copy: "M11 9h9a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-9a2 2 0 0 1-2-2v-9a2 2 0 0 1 2-2z M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1",
     dot: "M12 10a2 2 0 1 0 0 4 2 2 0 0 0 0-4z"
   };
   function icon(name) {
@@ -554,10 +630,12 @@ export const APP_JS = `
 
   function api(path, opts) {
     opts = opts || {};
-    opts.headers = Object.assign({ "Authorization": "Bearer " + key, "Content-Type": "application/json" }, opts.headers || {});
+    /* The browser sends the session cookie by itself; the extra header proves a change came from this page. */
+    opts.credentials = "same-origin";
+    opts.headers = Object.assign({ "Content-Type": "application/json", "X-Requested-With": "pr-triage" }, opts.headers || {});
     return fetch(path, opts).then(function (r) {
       return r.json().catch(function () { return {}; }).then(function (body) {
-        if (r.status === 401) { signOut(); throw new Error(body.error || "Signed out"); }
+        if (r.status === 401) { if (path !== "/api/login") signOut(false); throw new Error(body.error || "Signed out"); }
         if (!r.ok && !body.text) throw new Error(body.error || ("HTTP " + r.status));
         return body;
       });
@@ -603,10 +681,168 @@ export const APP_JS = `
     var row = el("div", "msg " + (mine ? "me" : "bot"));
     var av = el("div", "avatar"); av.appendChild(icon(mine ? "user" : "bot"));
     var d = el("div", "bubble " + cls, text);
-    row.appendChild(av); row.appendChild(d);
+    var col = el("div", "msgcol");
+    col.appendChild(d);
+    row.appendChild(av); row.appendChild(col);
     $("chat").appendChild(row);
     row.scrollIntoView({ block: "nearest" });
     return d;
+  }
+
+  /* ---------- readable answers ----------
+     The agent writes plain text (lists with "-", links on their own line). Turn that into clean
+     paragraphs, lists, key/value rows and link chips. It only ever builds DOM nodes from text. */
+  var NL = String.fromCharCode(10);
+  var TICK = String.fromCharCode(96);
+  var repoSlug = "";
+  function isDigit(c) { return c >= "0" && c <= "9"; }
+  function isSpace(c) { return c === " " || c === NL || c === String.fromCharCode(9) || c === String.fromCharCode(13); }
+  function endsWith(s, suffix) { return s.length >= suffix.length && s.slice(s.length - suffix.length) === suffix; }
+
+  function linkChip(url) {
+    var rest = url.slice(8);
+    var host = rest.split("/")[0];
+    var label = host;
+    var m = url.indexOf("/pull/");
+    var kind = "PR #";
+    if (m === -1) { m = url.indexOf("/issues/"); kind = "Issue #"; }
+    if (m > -1) {
+      var d = url.slice(m).split("/")[2] || "", n = "";
+      for (var k = 0; k < d.length && isDigit(d.charAt(k)); k++) n += d.charAt(k);
+      if (n) label = kind + n;
+    }
+    var a = el("a", "lnk");
+    a.href = url; a.target = "_blank"; a.rel = "noopener noreferrer"; a.title = url;
+    a.appendChild(icon(host === "github.com" ? "github" : "external"));
+    a.appendChild(document.createTextNode(label));
+    return a;
+  }
+
+  function prRef(num) {
+    if (!repoSlug) return el("span", "prref", "#" + num);
+    var a = el("a", "prref", "#" + num);
+    a.href = "https://github.com/" + repoSlug + "/pull/" + num;
+    a.target = "_blank"; a.rel = "noopener noreferrer"; a.title = "Open pull request " + num + " on GitHub";
+    return a;
+  }
+
+  /* **bold**, code in backticks, https links (also "(https://...)") and #123 references. */
+  function inline(parent, text) {
+    var buf = "";
+    var flush = function () { if (buf) { parent.appendChild(document.createTextNode(buf)); buf = ""; } };
+    var LABELS = ["View PR ", "View pull request ", "PR link: ", "Link: ", "Source: "];
+    var i = 0;
+    while (i < text.length) {
+      var c = text.charAt(i);
+      if (c === "*" && text.charAt(i + 1) === "*") {
+        var endB = text.indexOf("**", i + 2);
+        if (endB > i + 2) { flush(); parent.appendChild(el("strong", "", text.slice(i + 2, endB))); i = endB + 2; continue; }
+      }
+      if (c === TICK) {
+        var endC = text.indexOf(TICK, i + 1);
+        if (endC > i + 1) { flush(); parent.appendChild(el("code", "", text.slice(i + 1, endC))); i = endC + 1; continue; }
+      }
+      var wrapped = c === "(" && text.indexOf("https://", i + 1) === i + 1;
+      if (wrapped || text.indexOf("https://", i) === i) {
+        var start = wrapped ? i + 1 : i, j = start;
+        while (j < text.length && !isSpace(text.charAt(j)) && text.charAt(j) !== ")") j++;
+        var stop = j;
+        while (stop > start && ".,;:".indexOf(text.charAt(stop - 1)) > -1) stop--;
+        var url = text.slice(start, stop);
+        if (url.length > 8) {
+          if (wrapped && text.charAt(stop) === ")") stop++;
+          LABELS.forEach(function (l) { if (endsWith(buf, l)) buf = buf.slice(0, buf.length - l.length); });
+          flush(); parent.appendChild(linkChip(url)); i = stop; continue;
+        }
+      }
+      if (c === "#" && isDigit(text.charAt(i + 1)) && (i === 0 || isSpace(text.charAt(i - 1)) || text.charAt(i - 1) === "(")) {
+        var e = i + 1;
+        while (e < text.length && isDigit(text.charAt(e))) e++;
+        if (e - i - 1 <= 6) { flush(); parent.appendChild(prRef(text.slice(i + 1, e))); i = e; continue; }
+      }
+      buf += c; i++;
+    }
+    flush();
+  }
+
+  /* "State: Needs review" style sub-lines become a small label plus a value; known values get a badge. */
+  function detailRow(li, text) {
+    var k = text.indexOf(": ");
+    if (k < 1 || k > 26 || text.charAt(0) === "#" || text.slice(0, k).indexOf("http") > -1) { inline(li, text); return; }
+    var key = text.slice(0, k), value = text.slice(k + 2);
+    li.classList.add("kv");
+    li.appendChild(el("span", "k", key));
+    var lower = value.toLowerCase(), badge = null, s;
+    for (s in STATES) { if (Object.prototype.hasOwnProperty.call(STATES, s) && STATES[s].label.toLowerCase() === lower) badge = stateChip(s); }
+    if (!badge && key.toLowerCase().indexOf("ci") === 0) {
+      var tone = lower.indexOf("fail") > -1 ? "bad" : lower.indexOf("pass") > -1 || lower.indexOf("green") > -1 ? "ok" : lower.indexOf("pend") > -1 || lower.indexOf("running") > -1 ? "warn" : "";
+      if (tone) {
+        badge = el("span", "chip " + tone);
+        badge.appendChild(icon(tone === "ok" ? "checkCircle" : tone === "bad" ? "x" : "clock"));
+        badge.appendChild(el("span", "", value));
+      }
+    }
+    if (badge) li.appendChild(badge);
+    else { var v = el("span"); inline(v, value); li.appendChild(v); }
+  }
+
+  function renderRich(box, text) {
+    clear(box);
+    box.classList.add("rich");
+    var lines = text.split(NL);
+    var para = [], list = null, ordered = false, lastLi = null, sub = null;
+    var endList = function () { list = null; lastLi = null; sub = null; };
+    var flushPara = function () {
+      if (!para.length) return;
+      var p = el("p");
+      para.forEach(function (line, n) { if (n) p.appendChild(el("br")); inline(p, line); });
+      box.appendChild(p); para = [];
+    };
+    lines.forEach(function (raw) {
+      var line = raw.split(String.fromCharCode(13)).join("");
+      if (line.trim() === "") { flushPara(); endList(); return; }
+      var indent = 0;
+      while (indent < line.length && line.charAt(indent) === " ") indent++;
+      var rest = line.slice(indent);
+      var marker = rest.slice(0, 2);
+      var isBullet = marker === "- " || marker === "* " || rest.slice(0, 2) === String.fromCharCode(8226) + " ";
+      var d = 0;
+      while (d < rest.length && isDigit(rest.charAt(d))) d++;
+      var isNumbered = d > 0 && d < 4 && (rest.charAt(d) === "." || rest.charAt(d) === ")") && rest.charAt(d + 1) === " ";
+      if (isBullet || isNumbered) {
+        flushPara();
+        var body = isBullet ? rest.slice(2) : rest.slice(d + 2);
+        if (indent >= 2 && lastLi) {
+          if (!sub) { sub = el("ul"); lastLi.appendChild(sub); }
+          var sli = el("li"); detailRow(sli, body.trim()); sub.appendChild(sli);
+        } else {
+          if (!list || ordered !== isNumbered) { ordered = isNumbered; list = el(ordered ? "ol" : "ul"); box.appendChild(list); }
+          var li = el("li"); inline(li, body.trim()); list.appendChild(li); lastLi = li; sub = null;
+        }
+        return;
+      }
+      endList();
+      para.push(line.trim());
+    });
+    flushPara();
+  }
+
+  /* Finish a bot message: formatted text, then a small footer with the time and a copy button. */
+  function finishBot(bubbleEl, text) {
+    bubbleEl.className = "bubble bot";
+    renderRich(bubbleEl, text);
+    var col = bubbleEl.parentNode;
+    var meta = el("div", "msg-meta");
+    meta.appendChild(el("span", "", new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })));
+    var copy = iconBtn("", "copy", "Copy");
+    copy.onclick = function () {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(function () { toast("Answer copied.", "ok"); }, function () { toast("Could not copy.", "bad"); });
+      } else toast("Copy is not available in this browser.", "bad");
+    };
+    meta.appendChild(copy);
+    col.appendChild(meta);
+    col.parentNode.scrollIntoView({ block: "start", behavior: "smooth" });
   }
 
   function renderSuggestions() {
@@ -624,14 +860,50 @@ export const APP_JS = `
     if (!chatIsOpen()) openChat();
     $("send").disabled = true;
     bubble("me", t); $("text").value = "";
-    var wait = bubble("bot typing", "Thinking");
+    var wait = bubble("bot typing", "Checking GitHub");
     api("/api/chat", { method: "POST", body: JSON.stringify({ text: t, conversationId: conv }) })
-      .then(function (r) { wait.className = "bubble bot"; wait.textContent = r.text; loadActions(); loadBudget(); })
-      .catch(function (e) { wait.className = "bubble bot"; wait.textContent = "Error: " + e.message; })
+      .then(function (r) { finishBot(wait, r.text); loadActions(); loadBudget(); })
+      .catch(function (e) { wait.className = "bubble bot err"; wait.textContent = "Sorry, that did not work: " + e.message; })
       .then(function () {
         $("send").disabled = false;
         if (chatIsOpen()) $("text").focus(); else $("fabDot").classList.remove("hidden");
       });
+  }
+
+  /* ---------- guide popup: what this key may and may not do (text comes from the server, written as text only) ---------- */
+  function guideIsOpen() { return !$("guideModal").classList.contains("hidden"); }
+  function openGuide() {
+    $("guideModal").classList.remove("hidden");
+    $("guideClose").focus();
+  }
+  function closeGuide() {
+    $("guideModal").classList.add("hidden");
+    $("guideBtn").focus();
+  }
+
+  function loadGuide() {
+    return api("/api/guide").then(function (g) {
+      var box = $("guideBody"); clear(box);
+      box.appendChild(el("div", "guide-you" + (role === "approver" ? " ok" : ""), g.youAre));
+      g.sections.forEach(function (s) {
+        var sec = el("div", "guide-sec " + s.tone);
+        var h = el("h3");
+        h.appendChild(icon(s.tone === "can" ? "checkCircle" : s.tone === "cannot" ? "x" : "shield"));
+        h.appendChild(document.createTextNode(s.title));
+        sec.appendChild(h);
+        var ul = el("ul");
+        s.items.forEach(function (t) { ul.appendChild(el("li", "", t)); });
+        sec.appendChild(ul);
+        box.appendChild(sec);
+      });
+      /* Show it once to a new visitor, then leave it to the Guide button. */
+      var first = false;
+      try { first = !localStorage.getItem("guideSeen"); localStorage.setItem("guideSeen", "1"); } catch (e) {}
+      if (first) openGuide();
+    }).catch(function () {
+      clear($("guideBody"));
+      $("guideBody").appendChild(el("div", "muted", "The guide could not be loaded. Reload the page to try again."));
+    });
   }
 
   /* ---------- budget ---------- */
@@ -894,7 +1166,7 @@ export const APP_JS = `
     $("fWarn").checked = f.warn; $("fHideDrafts").checked = f.hideDrafts;
     renderChips(q);
 
-    $("queueMeta").textContent = q.repo + " - updated " + ago(q.generatedAt);
+    updateQueueMeta();
     saveFilters();
 
     var shown = sortItems(q.items.filter(matches), q.items);
@@ -917,15 +1189,48 @@ export const APP_JS = `
     updateToggleAll();
   }
 
-  function loadQueue(announce) {
-    var box = $("queue"); clear(box);
-    for (var i = 0; i < 3; i++) box.appendChild(el("div", "skeleton"));
-    $("refresh").disabled = true;
-    api("/api/queue")
-      .then(function (r) { queueData = r.queue; renderQueue(); if (announce === true) toast("Queue refreshed: " + r.queue.items.length + " open pull requests.", "ok"); })
-      .catch(function (e) { clear(box); box.appendChild(emptyState("alert", "Could not load the queue: " + e.message, "bad")); })
-      .then(function () { $("refresh").disabled = false; });
+  /* "updated 3 min ago", turning amber when the data is old enough to deserve a refresh. */
+  var STALE_MS = 5 * 60 * 1000;      // show the "may be outdated" hint
+  var RETURN_REFRESH_MS = 2 * 60 * 1000; // coming back to the tab refreshes data older than this
+  var queueLoading = false;
+  function updateQueueMeta() {
+    var meta = $("queueMeta");
+    if (!queueData) { meta.textContent = ""; meta.classList.remove("stale"); return; }
+    var age = Date.now() - new Date(queueData.generatedAt).getTime();
+    var old = age > STALE_MS;
+    meta.textContent = queueData.repo + " - updated " + ago(queueData.generatedAt) + (old ? " - may be outdated" : "");
+    meta.classList.toggle("stale", old);
+    meta.title = old ? "This list is more than 5 minutes old. Press Refresh to load the latest." : "";
   }
+
+  /* opts.quiet: refresh in the background without placeholders (used when you return to the tab).
+     opts.announce: confirm with a message (used by the Refresh button, which also asks for fresh data). */
+  function loadQueue(opts) {
+    opts = opts === true ? { announce: true } : (opts || {});
+    if (queueLoading) return;
+    queueLoading = true;
+    var box = $("queue");
+    if (!opts.quiet) {
+      clear(box);
+      for (var i = 0; i < 3; i++) box.appendChild(el("div", "skeleton"));
+    }
+    $("refresh").disabled = true;
+    api(opts.announce ? "/api/queue?refresh=1" : "/api/queue")
+      .then(function (r) { queueData = r.queue; renderQueue(); if (opts.announce) toast("Queue refreshed: " + r.queue.items.length + " open pull requests.", "ok"); })
+      .catch(function (e) {
+        if (opts.quiet) return; // keep showing the last good list; the amber hint says it is old
+        clear(box); box.appendChild(emptyState("alert", "Could not load the queue: " + e.message, "bad"));
+      })
+      .then(function () { queueLoading = false; $("refresh").disabled = false; });
+  }
+
+  /* Back on the tab after a while: quietly bring the list up to date. */
+  function refreshIfStale() {
+    if (!signedIn || document.hidden || !queueData) return;
+    if (Date.now() - new Date(queueData.generatedAt).getTime() > RETURN_REFRESH_MS) loadQueue({ quiet: true });
+  }
+  document.addEventListener("visibilitychange", refreshIfStale);
+  window.addEventListener("focus", refreshIfStale);
 
   /* ---------- theme ---------- */
   function currentTheme() {
@@ -939,7 +1244,7 @@ export const APP_JS = `
   }
 
   /* ---------- approvals ---------- */
-  var ACTION_TONE = { pending: "warn", executed: "ok", rejected: "", failed: "bad", uncertain: "bad", executing: "info", expired: "" };
+  var ACTION_TONE = { pending: "warn", executed: "ok", rejected: "bad", failed: "bad", uncertain: "bad", executing: "info", expired: "" };
   var ACTION_LABEL = { pending: "Waiting for approval", executed: "Posted", rejected: "Rejected", failed: "Not posted", uncertain: "Unconfirmed", executing: "Posting", expired: "Expired" };
   var ACTION_ICON = { pending: "clock", executed: "checkCircle", rejected: "x", failed: "alert", uncertain: "help", executing: "refresh", expired: "clock" };
 
@@ -969,21 +1274,49 @@ export const APP_JS = `
   var actionList = [];
   var actTab = null;
   var busy = 0;
+  var actOpen = {};       // id -> true/false once the user toggled a card
+  var actDraft = {};      // id -> text an approver is editing, kept if the list is redrawn
+  var HISTORY_LIMIT = 5;  // older decided requests stay behind "Show more"
+  var actShowAll = false;
+
+  /* Requests that need a decision start open; decided ones start collapsed to save space. */
+  function isActOpen(a) { return Object.prototype.hasOwnProperty.call(actOpen, a.id) ? actOpen[a.id] : a.status === "pending"; }
+
+  function updateActsToggle() {
+    var cards = document.querySelectorAll("#actions .act");
+    var allOpen = cards.length > 0 && document.querySelectorAll("#actions .act.open").length === cards.length;
+    setBtn($("toggleActs"), allOpen ? "collapse" : "expand", allOpen ? "Collapse all" : "Expand all");
+    $("toggleActs").disabled = cards.length === 0;
+  }
 
   function actionCard(a) {
     var tone = ACTION_TONE[a.status] || "";
-    var box = el("div", "act" + (tone ? " t-" + tone : ""));
+    var card = el("div", "act" + (tone ? " t-" + tone : ""));
 
+    /* Compact header (always visible): click it to show or hide the details below. */
     var head = el("div", "act-head");
+    var chev = el("button", "chev"); chev.type = "button";
+    chev.setAttribute("aria-label", "Show or hide details of the request for pull request " + a.prNumber);
+    head.appendChild(chev);
     var badge = el("span", "chip " + tone);
     badge.appendChild(icon(ACTION_ICON[a.status] || "dot"));
     badge.appendChild(el("span", "", ACTION_LABEL[a.status] || a.status));
     head.appendChild(badge);
     var prHref = safeUrl(a.prUrl);
-    var title = el(prHref ? "a" : "span", "act-title", "Comment on #" + a.prNumber + " " + a.prTitle);
-    if (prHref) { title.href = prHref; title.target = "_blank"; title.rel = "noopener noreferrer"; }
-    head.appendChild(title);
-    box.appendChild(head);
+    var hmain = el("div", "act-main");
+    hmain.appendChild(el("div", "act-title", "Comment on #" + a.prNumber + " " + a.prTitle));
+    hmain.appendChild(el("div", "act-preview", a.body));
+    head.appendChild(hmain);
+    head.appendChild(el("span", "act-when", ago(a.createdAt)));
+    card.appendChild(head);
+
+    var box = el("div", "act-body");
+    card.appendChild(box);
+    if (prHref) {
+      var prLink = linkBtn(prHref, "github", "#" + a.prNumber + " " + a.prTitle, "plain");
+      prLink.title = "Open the pull request on GitHub";
+      box.appendChild(prLink);
+    }
     box.appendChild(flowChart(a.status));
 
     var meta = "Requested by " + a.requestedBy + " via " + a.requestedVia + " - " + ago(a.createdAt);
@@ -992,9 +1325,17 @@ export const APP_JS = `
     box.appendChild(el("div", "act-meta", meta));
 
     var quote = el("blockquote", "quote");
-    quote.appendChild(el("small", "", a.status === "executed" ? "Posted comment" : "Exact comment text"));
-    quote.appendChild(document.createTextNode(a.body));
+    var quoteLabel = el("small", "", a.status === "executed" ? (a.originalBody ? "Posted comment (edited by the approver)" : "Posted comment") : "Exact comment text");
+    quote.appendChild(quoteLabel);
+    var quoteText = document.createTextNode(a.body);
+    quote.appendChild(quoteText);
     box.appendChild(quote);
+    if (a.originalBody) {
+      var origBox = el("details", "raw");
+      origBox.appendChild(el("summary", "", "Show the original draft that was edited"));
+      origBox.appendChild(el("pre", "", a.originalBody));
+      box.appendChild(origBox);
+    }
 
     if (a.reason) {
       var why = el("div", "why");
@@ -1008,36 +1349,61 @@ export const APP_JS = `
 
     if (a.status === "pending" && role === "approver") {
       var ok = iconBtn("primary", "check", "Approve and post");
+      var edit = iconBtn("ghost", "draft", "Edit text");
+      edit.title = "Change the wording before it is posted. The original draft is kept in the history.";
       var no = iconBtn("danger", "x", "Reject");
       var cancel = iconBtn("ghost small hidden", "x", "Cancel");
-      var armed = false, timer = null;
+      var armed = false, timer = null, editor = null;
+      var okLabel = function () { return editor ? "Approve and post edited text" : "Approve and post"; };
+      var startEdit = function (text) {
+        editor = document.createElement("textarea");
+        editor.value = text; editor.rows = 5; editor.maxLength = 2000;
+        editor.setAttribute("aria-label", "Edit the comment text before it is posted");
+        editor.oninput = function () { actDraft[a.id] = editor.value; };
+        quote.replaceChild(editor, quoteText);
+        quoteLabel.textContent = "Editing: exactly this text will be posted";
+        actDraft[a.id] = text;
+        setBtn(edit, "refresh", "Undo my edits"); setBtn(ok, "check", okLabel());
+      };
+      var stopEdit = function () {
+        if (!editor) return;
+        quote.replaceChild(quoteText, editor); editor = null; delete actDraft[a.id];
+        quoteLabel.textContent = "Exact comment text";
+        setBtn(edit, "draft", "Edit text"); setBtn(ok, "check", okLabel());
+      };
       var disarm = function () {
         armed = false; clearTimeout(timer); cancel.classList.add("hidden");
-        ok.className = "primary"; setBtn(ok, "check", "Approve and post"); no.classList.remove("hidden");
+        if (editor) editor.readOnly = false;
+        ok.className = "primary"; setBtn(ok, "check", okLabel()); no.classList.remove("hidden"); edit.classList.remove("hidden");
       };
       var decide = function (kind) {
-        busy++; ok.disabled = true; no.disabled = true; cancel.classList.add("hidden");
+        var payload = kind === "approve" && editor ? JSON.stringify({ body: editor.value }) : "{}";
+        busy++; ok.disabled = true; no.disabled = true; edit.disabled = true; cancel.classList.add("hidden");
         setBtn(kind === "approve" ? ok : no, "refresh", "Working...");
-        api("/api/actions/" + encodeURIComponent(a.id) + "/" + kind, { method: "POST", body: "{}" })
-          .then(function (r) { toast(r.text, r.ok === false ? "bad" : "ok"); })
+        api("/api/actions/" + encodeURIComponent(a.id) + "/" + kind, { method: "POST", body: payload })
+          .then(function (r) { toast(r.text, r.ok === false ? "bad" : "ok"); if (r.ok !== false) delete actDraft[a.id]; })
           .catch(function (e) { toast(e.message, "bad"); })
           .then(function () { busy--; loadActions(); });
       };
       ok.onclick = function () {
         if (!armed) {
-          // Posting is public and cannot be undone: ask once more, then time out.
-          armed = true; ok.className = "confirm"; setBtn(ok, "check", "Confirm: post this comment");
-          no.classList.add("hidden"); cancel.classList.remove("hidden");
+          if (editor && !editor.value.trim()) { toast("The comment is empty. Write the text to post, or undo your edits.", "bad"); return; }
+          // Posting is public and cannot be undone: ask once more, then time out. The text is frozen meanwhile.
+          armed = true; if (editor) editor.readOnly = true;
+          ok.className = "confirm"; setBtn(ok, "check", "Confirm: post this comment");
+          no.classList.add("hidden"); edit.classList.add("hidden"); cancel.classList.remove("hidden");
           timer = setTimeout(disarm, 8000);
           return;
         }
         decide("approve");
       };
+      edit.onclick = function () { if (editor) stopEdit(); else { startEdit(a.body); editor.focus(); } };
       no.onclick = function () { decide("reject"); };
       cancel.onclick = disarm;
-      foot.appendChild(ok); foot.appendChild(no); foot.appendChild(cancel);
+      foot.appendChild(ok); foot.appendChild(edit); foot.appendChild(no); foot.appendChild(cancel);
+      if (Object.prototype.hasOwnProperty.call(actDraft, a.id)) startEdit(actDraft[a.id]);
     } else if (a.status === "pending") {
-      foot.appendChild(el("span", "muted", "Waiting for an approver. Only the approver key can approve."));
+      foot.appendChild(el("span", "muted", "Waiting for an approver. Only an approver can approve."));
     } else if (a.status === "executed") {
       var done = safeUrl(a.resultUrl) || prHref;
       if (done) foot.appendChild(linkBtn(done, "external", a.resultUrl ? "View comment on GitHub" : "Open pull request", "ok"));
@@ -1052,7 +1418,20 @@ export const APP_JS = `
     raw.appendChild(el("summary", "", "Show full approval card (#" + a.id.slice(0, 8) + ")"));
     raw.appendChild(el("pre", "", a.card));
     box.appendChild(raw);
-    return box;
+
+    var setOpenAct = function (isOpen) {
+      card.classList.toggle("open", isOpen);
+      box.classList.toggle("hidden", !isOpen);
+      chev.setAttribute("aria-expanded", isOpen ? "true" : "false");
+    };
+    setOpenAct(isActOpen(a));
+    head.onclick = function () {
+      var next = box.classList.contains("hidden");
+      actOpen[a.id] = next;
+      setOpenAct(next);
+      updateActsToggle();
+    };
+    return card;
   }
 
   function renderActions() {
@@ -1078,7 +1457,20 @@ export const APP_JS = `
         : emptyState("inbox", "No actions yet. Ask the agent to propose a comment."));
       return;
     }
-    shown.forEach(function (a) { box.appendChild(actionCard(a)); });
+    var limited = actTab === "all" && !actShowAll && shown.length > HISTORY_LIMIT;
+    (limited ? shown.slice(0, HISTORY_LIMIT) : shown).forEach(function (a) { box.appendChild(actionCard(a)); });
+    if (limited) {
+      var more = el("button", "small more", "Show " + (shown.length - HISTORY_LIMIT) + " older");
+      more.type = "button";
+      more.onclick = function () { actShowAll = true; renderActions(); };
+      box.appendChild(more);
+    } else if (actTab === "all" && actShowAll && shown.length > HISTORY_LIMIT) {
+      var less = el("button", "small ghost more", "Show fewer");
+      less.type = "button";
+      less.onclick = function () { actShowAll = false; renderActions(); };
+      box.appendChild(less);
+    }
+    updateActsToggle();
   }
 
   function loadActions() {
@@ -1089,18 +1481,21 @@ export const APP_JS = `
 
   /* Keep approvals and the "updated ... ago" label fresh without extra GitHub calls. */
   setInterval(function () {
-    if (!key || document.hidden) return;
-    if (queueData) $("queueMeta").textContent = queueData.repo + " - updated " + ago(queueData.generatedAt);
-    if (!busy && !document.querySelector("#actions button.confirm")) loadActions();
+    if (!signedIn || document.hidden) return;
+    updateQueueMeta();
+    if (!busy && !document.querySelector("#actions button.confirm") && !document.querySelector("#actions textarea")) loadActions();
   }, 30000);
 
   /* ---------- session ---------- */
-  function signOut() {
-    sessionStorage.removeItem("key"); key = ""; queueData = null; f = newFilters(); open = {}; $("search").value = ""; actionList = []; actTab = null;
+  function signOut(endSession) {
+    /* Logout asks the server to end the session, so a copied cookie stops working too. */
+    if (endSession) { try { fetch("/api/logout", { method: "POST", credentials: "same-origin", headers: { "X-Requested-With": "pr-triage" } }); } catch (e) {} }
+    signedIn = false; $("key").value = ""; queueData = null; f = newFilters(); open = {}; $("search").value = ""; actionList = []; actTab = null; actOpen = {}; actDraft = {}; actShowAll = false;
     try { sessionStorage.removeItem("filters"); } catch (e) {}
     document.title = "PR Triage Agent";
     $("main").classList.add("hidden"); $("userbar").classList.add("hidden"); $("login").classList.remove("hidden");
     $("fab").classList.add("hidden"); $("fabDot").classList.add("hidden");
+    $("guideModal").classList.add("hidden");
     if (chatIsOpen()) closeChat();
     renderChatEmpty();
     $("repo").textContent = "";
@@ -1108,39 +1503,59 @@ export const APP_JS = `
 
   function signIn() {
     return api("/api/me").then(function (me) {
-      role = me.role;
+      role = me.role; signedIn = true;
       $("login").classList.add("hidden"); $("main").classList.remove("hidden"); $("userbar").classList.remove("hidden");
       $("fab").classList.remove("hidden");
       $("repo").textContent = me.repo;
+      repoSlug = me.repo;
       var who = $("who");
-      who.textContent = role === "approver" ? "Approver" : "Reader (cannot approve)";
+      who.textContent = (role === "approver" ? "Approver" : "Reader (cannot approve)") + (me.name && me.name.indexOf("shared") !== 0 ? " - " + me.name : "");
       who.className = "chip " + (role === "approver" ? "ok" : "");
-      loadQueue(); loadActions(); loadBudget();
+      loadQueue(); loadActions(); loadBudget(); loadGuide();
     });
   }
 
   $("loginBtn").onclick = function () {
-    key = $("key").value.trim(); $("loginMsg").textContent = "";
-    sessionStorage.setItem("key", key);
-    signIn().catch(function (e) { $("loginMsg").textContent = e.message; });
+    var typed = $("key").value.trim(); $("loginMsg").textContent = "";
+    if (!typed) { $("loginMsg").textContent = "Enter your key."; return; }
+    api("/api/login", { method: "POST", body: JSON.stringify({ key: typed }) })
+      .then(function () { $("key").value = ""; $("key").type = "password"; $("showKey").textContent = "Show"; return signIn(); })
+      .catch(function (e) { $("loginMsg").textContent = e.message; });
   };
   $("key").addEventListener("keydown", function (e) { if (e.key === "Enter") $("loginBtn").click(); });
-  $("logout").onclick = signOut;
+  $("logout").onclick = function () { signOut(true); };
   $("send").onclick = send;
   $("fab").onclick = function () { if (chatIsOpen()) closeChat(); else openChat(); };
   $("closeChat").onclick = closeChat;
   $("backdrop").onclick = closeChat;
   $("newChat").onclick = newChat;
-  document.addEventListener("keydown", function (e) { if (e.key === "Escape" && chatIsOpen()) closeChat(); });
+  document.addEventListener("keydown", function (e) {
+    if (e.key !== "Escape") return;
+    if (guideIsOpen()) closeGuide(); else if (chatIsOpen()) closeChat();
+  });
   renderChatEmpty();
   $("text").addEventListener("keydown", function (e) { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } });
   $("refresh").onclick = function () { loadQueue(true); };
+  $("toggleActs").onclick = function () {
+    var cards = document.querySelectorAll("#actions .act");
+    var allOpen = cards.length > 0 && document.querySelectorAll("#actions .act.open").length === cards.length;
+    var shown = actTab === "pending" ? actionList.filter(function (a) { return a.status === "pending"; }) : actionList;
+    shown.forEach(function (a) { actOpen[a.id] = !allOpen; });
+    renderActions();
+  };
   $("refreshActions").onclick = function () { loadActions().then(function () { toast("Approvals reloaded."); }); };
 
   /* Icons on the static buttons. */
   setBtn($("refresh"), "refresh", "Refresh");
   setBtn($("refreshActions"), "refresh", "Reload");
   setBtn($("logout"), "logout", "Sign out");
+  setBtn($("guideBtn"), "help", "Guide");
+  setBtn($("guideClose"), "x", "Close");
+  $("guideBtn").onclick = openGuide;
+  $("guideClose").onclick = closeGuide;
+  /* Click on the dark area (not the card) closes it; Tab stays on the Close button, the only control inside. */
+  $("guideModal").addEventListener("click", function (e) { if (e.target === $("guideModal")) closeGuide(); });
+  $("guideModal").addEventListener("keydown", function (e) { if (e.key === "Tab") { e.preventDefault(); $("guideClose").focus(); } });
   setBtn($("send"), "send", "Send");
   setBtn($("newChat"), "plus", "New chat");
   setBtn($("closeChat"), "x", "Close");
@@ -1191,6 +1606,7 @@ export const APP_JS = `
     try { localStorage.setItem("theme", next); } catch (e) {}
   };
   renderSuggestions();
-  if (key) signIn().catch(function () {});
+  /* Already signed in (valid session cookie)? Go straight to the app; otherwise this just shows the login box. */
+  signIn().catch(function () {});
 })();
 `;

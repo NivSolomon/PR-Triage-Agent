@@ -30,6 +30,32 @@ describe("loadConfig", () => {
     expect(() => loadConfig({ WEB_ACCESS_KEY: "short" })).toThrow(/at least 16/);
   });
 
+  it("reads per-person web users and the proxy setting", () => {
+    const c = loadConfig({
+      WEB_USERS: JSON.stringify({ dana: { key: "dana-personal-key-0123", role: "approver" }, "lee.k": { key: "lee-personal-key-012345", role: "reader" } }),
+      TRUST_PROXY: "1",
+    });
+    expect(c.WEB_USERS).toEqual([
+      { name: "dana", key: "dana-personal-key-0123", role: "approver" },
+      { name: "lee.k", key: "lee-personal-key-012345", role: "reader" },
+    ]);
+    expect(c.TRUST_PROXY).toBe(1);
+    expect(loadConfig({}).WEB_USERS).toEqual([]);
+    expect(loadConfig({}).TRUST_PROXY).toBe(0);
+  });
+
+  it("rejects web users that are malformed: short key, unknown role, odd name, repeated key", () => {
+    const bad = (v: unknown) => () => loadConfig({ WEB_USERS: JSON.stringify(v) });
+    expect(bad({ dana: { key: "short", role: "approver" } })).toThrow(/WEB_USERS/);
+    expect(bad({ dana: { key: "dana-personal-key-0123", role: "admin" } })).toThrow(/WEB_USERS/);
+    expect(bad({ "Dana Smith": { key: "dana-personal-key-0123", role: "reader" } })).toThrow(/WEB_USERS/);
+    expect(
+      bad({ a: { key: "same-key-0123456789", role: "reader" }, b: { key: "same-key-0123456789", role: "reader" } }),
+    ).toThrow(/WEB_USERS/);
+    expect(() => loadConfig({ WEB_USERS: "not json" })).toThrow(/WEB_USERS/);
+    expect(() => loadConfig({ TRUST_PROXY: "9" })).toThrow(/TRUST_PROXY/);
+  });
+
   it("parses comma separated Slack member ids and trims whitespace", () => {
     const c = loadConfig({ SLACK_APPROVER_USER_IDS: " U01ABC, U02DEF ,,W03GHI " });
     expect(c.SLACK_APPROVER_USER_IDS).toEqual(["U01ABC", "U02DEF", "W03GHI"]);

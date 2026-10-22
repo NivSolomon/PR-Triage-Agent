@@ -25,6 +25,8 @@ export type McpRole = "reader" | "proposer";
 export interface McpDeps {
   /** token -> role, from MCP_TOKENS. */
   tokens: Record<string, McpRole>;
+  /** Wrong tokens allowed per address before a pause; 0 = never pause. Default 10. */
+  maxFailures?: number;
   agent: Agent;
   tools: ToolDeps;
   /** A request created over MCP must reach the human approvers. */
@@ -137,7 +139,7 @@ function buildMcpServer(caller: Caller, deps: McpDeps): McpServer {
 /** Express router for POST /mcp (stateless Streamable HTTP). */
 export function createMcpRouter(deps: McpDeps): express.Router {
   const router = express.Router();
-  const throttle = new FailureThrottle();
+  const throttle = new FailureThrottle(deps.maxFailures);
 
   router.use((req, res, next) => {
     const ip = req.ip ?? "unknown";

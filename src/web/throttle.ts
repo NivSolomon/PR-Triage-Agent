@@ -13,7 +13,7 @@ export function bearerToken(header: string | undefined): string {
   return h.startsWith("Bearer ") ? h.slice(7).trim() : "";
 }
 
-/** Locks an address out after too many wrong secrets in a time window. */
+/** Locks an address out after too many wrong secrets in a time window. A limit of 0 turns the lockout off. */
 export class FailureThrottle {
   private readonly failures = new Map<string, { count: number; resetAt: number }>();
 
@@ -24,11 +24,13 @@ export class FailureThrottle {
   ) {}
 
   blocked(ip: string): boolean {
+    if (this.limit <= 0) return false;
     const rec = this.failures.get(ip);
     return Boolean(rec && rec.resetAt > this.now() && rec.count >= this.limit);
   }
 
   fail(ip: string): void {
+    if (this.limit <= 0) return;
     const now = this.now();
     const rec = this.failures.get(ip);
     const current = rec && rec.resetAt > now ? rec : { count: 0, resetAt: now + this.windowMs };

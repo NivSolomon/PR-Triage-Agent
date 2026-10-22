@@ -24,6 +24,31 @@ const slackGithubMap = csv
   )
   .transform((pairs) => Object.fromEntries(pairs.map((p) => p.split(":") as [string, string])));
 
+/** WEB_USERS: {"dana":{"key":"<16+ chars>","role":"approver"},"lee":{"key":"...","role":"reader"}} */
+const webUsers = z
+  .string()
+  .default("{}")
+  .transform((s, ctx) => {
+    try {
+      const parsed = z
+        .record(
+          z.string().regex(/^[a-z0-9][a-z0-9._-]{0,31}$/, "name: lowercase letters, digits, . _ - (max 32)"),
+          z.object({ key: z.string().min(16, "key too short"), role: z.enum(["reader", "approver"]) }).strict(),
+        )
+        .parse(JSON.parse(s));
+      const users = Object.entries(parsed).map(([name, u]) => ({ name, key: u.key, role: u.role }));
+      if (new Set(users.map((u) => u.key)).size !== users.length) throw new Error("duplicate key");
+      return users;
+    } catch {
+      ctx.addIssue({
+        code: "custom",
+        message:
+          'must be JSON like {"dana":{"key":"<16+ chars, different for each person>","role":"approver"|"reader"}}; names are lowercase letters, digits, . _ -',
+      });
+      return z.NEVER;
+    }
+  });
+
 const jsonMap = z
   .string()
   .default("{}")
@@ -81,9 +106,15 @@ const schema = z.object({
   DAILY_REQUESTS_PER_USER: z.coerce.number().int().positive().default(40),
 
   PORT: z.coerce.number().int().positive().default(3000),
-  /** Lets someone use the web page (read, chat, propose). Cannot approve. */
+  /** Recommended web logins: one key per person, each with a role. Actions are recorded under that person's name. */
+  WEB_USERS: webUsers,
+  /** Set to 1 when behind one reverse proxy (Fly.io), so the real client address and HTTPS are seen. 0 = none. */
+  TRUST_PROXY: z.coerce.number().int().min(0).max(5).default(0),
+  /** Wrong keys allowed per address in 10 minutes before it is paused. 0 = never pause (fine on a private machine). */
+  AUTH_MAX_FAILURES: z.coerce.number().int().min(0).default(10),
+  /** Shared key (older, simpler): lets anyone holding it use the web page (read, chat, propose). Cannot approve. */
   WEB_ACCESS_KEY: z.string().min(16, "use at least 16 characters").optional(),
-  /** Lets someone approve or reject from the web page. Must differ from WEB_ACCESS_KEY. */
+  /** Shared key (older, simpler): lets anyone holding it approve or reject. Must differ from WEB_ACCESS_KEY. */
   WEB_APPROVER_KEY: z.string().min(16, "use at least 16 characters").optional(),
   MCP_TOKENS: jsonMap,
 

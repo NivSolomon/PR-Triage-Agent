@@ -32,6 +32,8 @@ export function makeIsApprover(config: Config): (actorId: string) => boolean {
   const allowed = new Set(config.SLACK_APPROVER_USER_IDS.map((id) => `slack:${id}`));
   // The web approver identity exists only if an approver key is configured.
   if (config.WEB_APPROVER_KEY) allowed.add(WEB_APPROVER_ACTOR);
+  // Each named web user with the approver role is their own approver identity.
+  for (const u of config.WEB_USERS) if (u.role === "approver") allowed.add(`web:${u.name}`);
   return (actorId) => allowed.has(actorId);
 }
 
@@ -91,6 +93,9 @@ export function createApp(config: Config): App {
   };
 
   const web = createWebApp({
+    users: config.WEB_USERS,
+    trustProxy: config.TRUST_PROXY,
+    maxFailures: config.AUTH_MAX_FAILURES,
     accessKey: config.WEB_ACCESS_KEY,
     approverKey: config.WEB_APPROVER_KEY,
     approverActor: WEB_APPROVER_ACTOR,
@@ -105,6 +110,7 @@ export function createApp(config: Config): App {
         "/mcp",
         createMcpRouter({
           tokens: config.MCP_TOKENS,
+          maxFailures: config.AUTH_MAX_FAILURES,
           agent,
           tools: { github, approvals },
           onProposed: async (record) => void (await slack.sendApprovalCards(record)),

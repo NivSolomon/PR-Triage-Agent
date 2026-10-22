@@ -11,6 +11,8 @@ primary_region = "fra"
   DIGEST_CRON = "30 8 * * 1-5"
   MONTHLY_BUDGET_USD = "50"
   HOSTING_COST_USD = "7"
+  # One reverse proxy (Fly's) sits in front: needed for the real client address (login lockout) and the Secure cookie.
+  TRUST_PROXY = "1"
   # Secrets (GITHUB_TOKEN, LLM_API_KEY, SLACK_BOT_TOKEN, SLACK_APP_TOKEN, WEB_*_KEY, MCP_TOKENS, ...) are NOT here.
   # Set them with: fly secrets set NAME=value
 
