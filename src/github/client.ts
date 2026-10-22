@@ -83,8 +83,12 @@ const rawReviews = z.array(
 );
 
 const rawCombinedStatus = z.object({
+  total_count: z.number().optional(),
   statuses: z.array(z.object({ context: z.string(), state: z.string() })).default([]),
 });
+
+/** Pages of 100 read for a list GitHub paginates (check runs, reviews). Beyond this we say "unknown" instead of guessing. */
+const MAX_PAGES = 5;
 
 const rawPrFiles = z.array(z.object({ filename: z.string(), additions: z.number(), deletions: z.number() }));
 
@@ -287,10 +291,14 @@ export class GitHubClient {
   private async getChecks(sha: string, number: number): Promise<CheckSummary | null> {
     try {
       const [raw, combined, flags] = await Promise.all([
-        this.get(`/commits/${sha}/check-runs?per_page=100`).then((r) => rawCheckRuns.parse(r)),
-        this.get(`/commits/${sha}/status`).then((r) => rawCombinedStatus.parse(r)),
+        this.getAllCheckRuns(sha),
+        this.get(`/commits/${sha}/status?per_page=100`).then((r) => rawCombinedStatus.parse(r)),
         this.getRequiredFlags(number),
       ]);
+      // A failure on a page we never read would look like a green build. If the list is incomplete, CI is unknown.
+      if (combined.total_count !== undefined && combined.statuses.length < combined.total_count) {
+        throw new GitHubError(`Only ${combined.statuses.length} of ${combined.total_count} commit statuses could be read`);
+      }
       const failing: string[] = [];
       const pending: string[] = [];
       let passing = 0;
@@ -320,6 +328,22 @@ export class GitHubClient {
       if (err instanceof GitHubError) return null; // CI data unavailable: report "unknown", not "passing".
       throw err;
     }
+  }
+
+  /** Every check run for a commit. Throws when some cannot be read, so the caller reports CI as unknown. */
+  private async getAllCheckRuns(sha: string): Promise<z.infer<typeof rawCheckRuns>> {
+    const runs: z.infer<typeof rawCheckRuns>["check_runs"] = [];
+    let totalCount = 0;
+    for (let page = 1; page <= MAX_PAGES; page++) {
+      const raw = rawCheckRuns.parse(await this.get(`/commits/${sha}/check-runs?per_page=100&page=${page}`));
+      totalCount = raw.total_count;
+      runs.push(...raw.check_runs);
+      if (runs.length >= totalCount || raw.check_runs.length === 0) break;
+    }
+    if (runs.length < totalCount) {
+      throw new GitHubError(`Only ${runs.length} of ${totalCount} check runs could be read`);
+    }
+    return { total_count: totalCount, check_runs: runs };
   }
 
   /** Which checks are required to merge, via GraphQL (REST would need admin rights). Null if it cannot be read. */
@@ -375,7 +399,15 @@ export class GitHubClient {
     }
   }
   private async getReviews(number: number): Promise<ReviewSummary[]> {
-    const raw = rawReviews.parse(await this.get(`/pulls/${number}/reviews?per_page=100`));
+    // Reviews come oldest first, so a page we never read would hold the NEWEST ones (a late "changes requested"
+    // or a dismissed approval). Read every page; if there are too many, fail loudly instead of ranking on stale reviews.
+    const raw: z.infer<typeof rawReviews> = [];
+    for (let page = 1; ; page++) {
+      if (page > MAX_PAGES) throw new GitHubError(`Pull request ${number} has more than ${MAX_PAGES * 100} reviews`);
+      const batch = rawReviews.parse(await this.get(`/pulls/${number}/reviews?per_page=100&page=${page}`));
+      raw.push(...batch);
+      if (batch.length < 100) break;
+    }
     // Keep the latest meaningful state per reviewer. Plain comments don't override an approval.
     const latest = new Map<string, ReviewSummary>();
     for (const r of raw) {

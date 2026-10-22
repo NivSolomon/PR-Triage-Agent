@@ -378,3 +378,76 @@ describe("writes", () => {
     expect(isAmbiguousFailure(new Error("other"))).toBe(false);
   });
 });
+
+describe("getPr: lists GitHub splits into pages", () => {
+  const rest = {
+    "/issues/7/comments": [],
+    "/pulls/7/files": [],
+    "/issues/7/events": [],
+    "/pulls/7": pr({ additions: 1, deletions: 1, changed_files: 1, mergeable_state: "clean", comments: 0 }),
+  };
+  const run = (name: string, conclusion = "success") => ({ name, status: "completed", conclusion });
+  const many = (n: number, make: (i: number) => unknown) => Array.from({ length: n }, (_, i) => make(i));
+  const runsUrl = (page: number) => `/commits/abc123/check-runs?per_page=100&page=${page}`;
+
+  it("reads every page of check runs, so a failure on page 2 is not mistaken for a green build", async () => {
+    const detail = await client({
+      [runsUrl(1)]: { total_count: 150, check_runs: many(100, (i) => run(`job-${i}`)) },
+      [runsUrl(2)]: { total_count: 150, check_runs: [...many(49, (i) => run(`late-${i}`)), run("late-fail", "failure")] },
+      "/commits/abc123/status": { statuses: [] },
+      "/pulls/7/reviews": [],
+      ...rest,
+    }).getPr(7);
+    expect(detail.checks).toMatchObject({ total: 150, passing: 149, failing: ["late-fail"] });
+  });
+
+  it("reports CI as unknown when not every check run could be read", async () => {
+    const detail = await client({
+      [runsUrl(1)]: { total_count: 150, check_runs: many(100, (i) => run(`job-${i}`)) },
+      [runsUrl(2)]: { total_count: 150, check_runs: [] },
+      "/commits/abc123/status": { statuses: [] },
+      "/pulls/7/reviews": [],
+      ...rest,
+    }).getPr(7);
+    expect(detail.checks).toBeNull();
+  });
+
+  it("reports CI as unknown when not every commit status could be read", async () => {
+    const detail = await client({
+      "/check-runs": { total_count: 0, check_runs: [] },
+      "/commits/abc123/status": { total_count: 40, statuses: many(30, (i) => ({ context: `ci-${i}`, state: "success" })) },
+      "/pulls/7/reviews": [],
+      ...rest,
+    }).getPr(7);
+    expect(detail.checks).toBeNull();
+  });
+
+  it("reads every page of reviews: a late change request on page 2 replaces an earlier approval", async () => {
+    const detail = await client({
+      "/pulls/7/reviews?per_page=100&page=1": many(100, (i) => ({ user: { login: `u${i}` }, state: "APPROVED", commit_id: "abc123" })),
+      "/pulls/7/reviews?per_page=100&page=2": [
+        { user: { login: "u0" }, state: "CHANGES_REQUESTED", commit_id: "abc123" },
+        { user: { login: "late" }, state: "CHANGES_REQUESTED", commit_id: "abc123" },
+      ],
+      "/check-runs": { total_count: 0, check_runs: [] },
+      "/commits/abc123/status": { statuses: [] },
+      ...rest,
+    }).getPr(7);
+    const states = new Map(detail.reviews.map((r) => [r.reviewer, r.state]));
+    expect(states.get("u0")).toBe("CHANGES_REQUESTED");
+    expect(states.get("late")).toBe("CHANGES_REQUESTED");
+    expect(states.get("u1")).toBe("APPROVED");
+    expect(detail.reviews).toHaveLength(101);
+  });
+
+  it("fails loudly, instead of ranking on stale reviews, when there are more reviews than it will read", async () => {
+    await expect(
+      client({
+        "/pulls/7/reviews": many(100, (i) => ({ user: { login: `u${i}` }, state: "APPROVED" })),
+        "/check-runs": { total_count: 0, check_runs: [] },
+        "/commits/abc123/status": { statuses: [] },
+        ...rest,
+      }).getPr(7),
+    ).rejects.toThrow(GitHubError);
+  });
+});
