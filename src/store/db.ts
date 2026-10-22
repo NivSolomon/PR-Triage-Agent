@@ -43,6 +43,9 @@ const MIGRATIONS: string[] = [
      key   TEXT PRIMARY KEY,
      value TEXT NOT NULL
    );`,
+  // When an approver edits the text, `body` becomes what was posted and the draft that was shown to
+  // them (the agent's or the requester's) is kept here. NULL means the text was posted unchanged.
+  `ALTER TABLE pending_actions ADD COLUMN original_body TEXT;`,
 ];
 
 export function openDatabase(path: string): DatabaseSync {

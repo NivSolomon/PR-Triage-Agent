@@ -18,6 +18,13 @@ export function renderApprovalCard(a: ActionRecord): string {
       .map((l) => `> ${l}`)
       .join("\n"),
     ``,
+    ...(a.originalBody
+      ? [
+          `Edited by the approver before posting. The original draft was:`,
+          ...a.originalBody.split("\n").map((l) => `| ${l}`),
+          ``,
+        ]
+      : []),
     `Why the agent suggests it: ${a.reason || "(no reason given)"}`,
     `Requested by ${a.requestedBy} via ${a.requestedVia}`,
     `Expires: ${a.expiresAt}`,
@@ -30,7 +37,7 @@ export function renderApprovalCard(a: ActionRecord): string {
 export function renderOutcome(a: ActionRecord): string {
   switch (a.status) {
     case "executed":
-      return `Posted the comment on #${a.prNumber}: ${a.resultUrl ?? a.prUrl}`;
+      return `Posted ${a.originalBody ? "your edited" : "the"} comment on #${a.prNumber}: ${a.resultUrl ?? a.prUrl}`;
     case "rejected":
       return `Rejected. Nothing was posted on #${a.prNumber}.`;
     case "expired":

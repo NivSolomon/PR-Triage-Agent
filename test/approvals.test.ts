@@ -224,3 +224,112 @@ describe("approval card", () => {
     expect(card).toContain("Expires");
   });
 });
+
+describe("approve with an edit by the approver", () => {
+  let ctx: ReturnType<typeof setup>;
+  beforeEach(() => {
+    ctx = setup();
+  });
+
+  const posted = (): string => (ctx.github.postComment.mock.calls[0] as [number, string])[1];
+
+  it("posts the approver's corrected text, not the draft, and keeps the draft for the record", async () => {
+    const a = await ctx.service.propose(proposal);
+    const done = await ctx.service.approve(a.id, APPROVER, { editedBody: "  Please re-run the unit tests.  " });
+
+    expect(done.status).toBe("executed");
+    expect(ctx.github.postComment).toHaveBeenCalledTimes(1);
+    expect(posted().startsWith("Please re-run the unit tests.")).toBe(true);
+    expect(posted()).not.toContain(proposal.body);
+    expect(posted()).toContain(actionMarker(a.id));
+    expect(done.body).toBe("Please re-run the unit tests.");
+    expect(done.originalBody).toBe(proposal.body);
+    expect(done.decidedBy).toBe(APPROVER);
+  });
+
+  it("is not an edit when the text is unchanged: no original is recorded", async () => {
+    const a = await ctx.service.propose(proposal);
+    const done = await ctx.service.approve(a.id, APPROVER, { editedBody: `  ${proposal.body}\n` });
+    expect(done.originalBody).toBeNull();
+    expect(posted().startsWith(proposal.body)).toBe(true);
+  });
+
+  it("only an approver can edit: anyone else changes nothing and nothing is posted", async () => {
+    const a = await ctx.service.propose(proposal);
+    await expect(ctx.service.approve(a.id, OUTSIDER, { editedBody: "Sneaky text" })).rejects.toMatchObject({
+      code: "not_authorized",
+    });
+    const after = ctx.service.get(a.id);
+    expect(after?.status).toBe("pending");
+    expect(after?.body).toBe(proposal.body);
+    expect(after?.originalBody).toBeNull();
+    expect(ctx.github.postComment).not.toHaveBeenCalled();
+  });
+
+  it("refuses an empty or oversized edit, posts nothing, and the request stays pending and approvable", async () => {
+    const a = await ctx.service.propose(proposal);
+    await expect(ctx.service.approve(a.id, APPROVER, { editedBody: "   " })).rejects.toMatchObject({ code: "invalid_input" });
+    await expect(ctx.service.approve(a.id, APPROVER, { editedBody: "x".repeat(2001) })).rejects.toMatchObject({
+      code: "invalid_input",
+    });
+    expect(ctx.github.postComment).not.toHaveBeenCalled();
+    expect(ctx.service.get(a.id)).toMatchObject({ status: "pending", body: proposal.body, originalBody: null });
+    expect((await ctx.service.approve(a.id, APPROVER)).status).toBe("executed");
+  });
+
+  it("two approvers racing with different texts: exactly one comment, and it is the winner's text", async () => {
+    const a = await ctx.service.propose(proposal);
+    const results = await Promise.allSettled([
+      ctx.service.approve(a.id, APPROVER, { editedBody: "Text from first" }),
+      ctx.service.approve(a.id, APPROVER, { editedBody: "Text from second" }),
+    ]);
+    expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+    expect(ctx.github.postComment).toHaveBeenCalledTimes(1);
+    const final = ctx.service.get(a.id);
+    expect(final?.body).toMatch(/^Text from (first|second)$/);
+    expect(posted().startsWith(final?.body ?? "?")).toBe(true);
+    expect(final?.originalBody).toBe(proposal.body);
+  });
+
+  it("an edit cannot rewrite a request that was already decided", async () => {
+    const a = await ctx.service.propose(proposal);
+    await ctx.service.approve(a.id, APPROVER);
+    await expect(ctx.service.approve(a.id, APPROVER, { editedBody: "Too late" })).rejects.toMatchObject({
+      code: "not_pending",
+    });
+    expect(ctx.service.get(a.id)).toMatchObject({ body: proposal.body, originalBody: null });
+    expect(ctx.github.postComment).toHaveBeenCalledTimes(1);
+  });
+
+  it("an edit cannot revive an expired request", async () => {
+    const a = await ctx.service.propose(proposal);
+    ctx.advance(61_000);
+    await expect(ctx.service.approve(a.id, APPROVER, { editedBody: "Late edit" })).rejects.toMatchObject({
+      code: "not_pending",
+    });
+    expect(ctx.service.get(a.id)?.body).toBe(proposal.body);
+    expect(ctx.github.postComment).not.toHaveBeenCalled();
+  });
+
+  it("the card and the outcome tell the truth about an edit", async () => {
+    const a = await ctx.service.propose(proposal);
+    const done = await ctx.service.approve(a.id, APPROVER, { editedBody: "Better wording" });
+    expect(renderOutcome(done)).toMatch(/Posted your edited comment/);
+    const card = renderApprovalCard(done);
+    expect(card).toContain("Edited by the approver");
+    expect(card).toContain(`| ${proposal.body}`);
+    // An unedited one says nothing about edits.
+    const b = await ctx.service.propose(proposal);
+    const plain = await ctx.service.approve(b.id, APPROVER);
+    expect(renderApprovalCard(plain)).not.toContain("Edited by the approver");
+    expect(renderOutcome(plain)).toMatch(/Posted the comment/);
+  });
+
+  it("an edited comment that fails to post keeps both texts on the record", async () => {
+    const failing = setup({ postComment: vi.fn(async () => { throw new GitHubError("Forbidden", 403); }) });
+    const a = await failing.service.propose(proposal);
+    const done = await failing.service.approve(a.id, APPROVER, { editedBody: "Edited but refused" });
+    expect(done.status).toBe("failed");
+    expect(done).toMatchObject({ body: "Edited but refused", originalBody: proposal.body });
+  });
+});

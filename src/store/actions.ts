@@ -22,8 +22,10 @@ export interface ActionRecord {
   prNumber: number;
   prTitle: string;
   prUrl: string;
-  /** Exact text that will be posted. */
+  /** Exact text that will be posted (or was posted). */
   body: string;
+  /** The draft as first proposed, kept only when an approver edited it before approving. Null = unchanged. */
+  originalBody: string | null;
   status: ActionStatus;
   requestedBy: string;
   requestedVia: string;
@@ -44,6 +46,7 @@ interface Row {
   pr_title: string;
   pr_url: string;
   body: string;
+  original_body: string | null;
   status: string;
   requested_by: string;
   requested_via: string;
@@ -64,6 +67,7 @@ function toRecord(r: Row): ActionRecord {
     prTitle: r.pr_title,
     prUrl: r.pr_url,
     body: r.body,
+    originalBody: r.original_body ?? null,
     status: r.status as ActionStatus,
     requestedBy: r.requested_by,
     requestedVia: r.requested_via,
@@ -138,15 +142,21 @@ export class ActionRepository {
   /**
    * Atomically move pending -> executing. Returns false if the action is not pending
    * or has expired, so a double tap (or two approvers) can never run it twice.
+   *
+   * `editedBody`: the approver changed the text. It replaces `body` in the SAME statement that wins the
+   * claim, so the text that is posted is exactly the text that was approved, and a losing caller changes
+   * nothing. The draft they were shown is kept in `original_body`.
    */
-  claimForExecution(id: string, by: string, nowIso: string): boolean {
+  claimForExecution(id: string, by: string, nowIso: string, editedBody: string | null = null): boolean {
     const res = this.db
       .prepare(
         `UPDATE pending_actions
-            SET status = 'executing', decided_by = ?, decided_at = ?
+            SET status = 'executing', decided_by = ?, decided_at = ?,
+                original_body = CASE WHEN ? IS NOT NULL THEN body ELSE original_body END,
+                body = CASE WHEN ? IS NOT NULL THEN ? ELSE body END
           WHERE id = ? AND status = 'pending' AND expires_at > ?`,
       )
-      .run(by, nowIso, id, nowIso);
+      .run(by, nowIso, editedBody, editedBody, editedBody, id, nowIso);
     return Number(res.changes) === 1;
   }
 

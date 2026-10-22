@@ -83,9 +83,14 @@ export async function decide(
   kind: DecisionKind,
   id: string,
   actorId: string,
+  /** Approve only: the approver corrected the text before approving. */
+  editedBody?: string,
 ): Promise<DecisionResult> {
   try {
-    const record = kind === "approve" ? await approvals.approve(id, actorId) : await approvals.reject(id, actorId);
+    const record =
+      kind === "approve"
+        ? await (editedBody === undefined ? approvals.approve(id, actorId) : approvals.approve(id, actorId, { editedBody }))
+        : await approvals.reject(id, actorId);
     return { ok: record.status === "executed" || record.status === "rejected", text: renderOutcome(record), record };
   } catch (err) {
     if (err instanceof ApprovalError) return { ok: false, text: err.message };

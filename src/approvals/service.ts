@@ -67,14 +67,7 @@ export class ApprovalService {
    * action that a human approver must explicitly approve.
    */
   async propose(input: ProposeInput): Promise<ActionRecord> {
-    const body = input.body.trim();
-    if (!body) throw new ApprovalError("invalid_input", "The comment is empty.");
-    if (body.length > MAX_COMMENT_LENGTH) {
-      throw new ApprovalError(
-        "invalid_input",
-        `The comment is too long (${body.length} > ${MAX_COMMENT_LENGTH} characters).`,
-      );
-    }
+    const body = this.validateBody(input.body);
 
     this.opts.repo.expireOverdue(this.now().toISOString());
     if (this.opts.repo.list(["pending"], MAX_PENDING + 1).length >= MAX_PENDING) {
@@ -134,19 +127,42 @@ export class ApprovalService {
   }
 
   /**
-   * Approve and execute exactly this stored action. The text that is posted is the text
-   * the approver saw: it is read from the stored record, never from the caller.
+   * Approve and execute this stored action. By default the text posted is the stored text the approver saw.
+   *
+   * An approver may pass `editedBody` to correct the draft first. That is still a human decision about an
+   * exact text: it is checked like any proposal, applied in the same atomic step that claims the action,
+   * and the original draft is kept. It can only come from an approver (checked first) and never from a
+   * proposer, so nobody can use the edit to slip different text past the person who approves.
    */
-  async approve(id: string, actorId: string): Promise<ActionRecord> {
+  async approve(id: string, actorId: string, opts: { editedBody?: string } = {}): Promise<ActionRecord> {
     this.assertApprover(actorId);
     const action = this.opts.repo.get(id);
     if (!action) throw new ApprovalError("not_found", "No such action.");
 
+    let edited: string | null = null;
+    if (opts.editedBody !== undefined) {
+      const body = this.validateBody(opts.editedBody);
+      if (body !== action.body) edited = body; // identical text is not an edit
+    }
+
     // Atomic claim: only one caller can move pending -> executing.
-    if (!this.opts.repo.claimForExecution(id, actorId, this.now().toISOString())) {
+    if (!this.opts.repo.claimForExecution(id, actorId, this.now().toISOString(), edited)) {
       throw this.notPending(this.mustGet(id));
     }
-    return this.execute(action);
+    // Read the claimed row back: it holds the text that was actually approved.
+    return this.execute(this.mustGet(id));
+  }
+
+  private validateBody(raw: string): string {
+    const body = raw.trim();
+    if (!body) throw new ApprovalError("invalid_input", "The comment is empty.");
+    if (body.length > MAX_COMMENT_LENGTH) {
+      throw new ApprovalError(
+        "invalid_input",
+        `The comment is too long (${body.length} > ${MAX_COMMENT_LENGTH} characters).`,
+      );
+    }
+    return body;
   }
 
   private async execute(action: ActionRecord): Promise<ActionRecord> {
