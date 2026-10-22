@@ -40,10 +40,10 @@
 
   <rect x="20" y="132" width="190" height="86" rx="8" fill="#eff6ff" stroke="#2563eb"/>
   <text x="32" y="152" font-size="12" font-weight="700">Web GUI</text>
-  <text x="32" y="168" font-size="10">chat, ranked queue, audit list</text>
-  <text x="32" y="182" font-size="10">access key: read + ask</text>
-  <text x="32" y="196" font-size="10" fill="#15803d" font-weight="600">approver key: Approve / Reject</text>
-  <text x="32" y="210" font-size="10">failed keys are throttled</text>
+  <text x="32" y="168" font-size="10">chat, ranked queue, approvals</text>
+  <text x="32" y="182" font-size="10">key once, then session cookie</text>
+  <text x="32" y="196" font-size="10" fill="#15803d" font-weight="600">approver role: Approve / Reject</text>
+  <text x="32" y="210" font-size="10">wrong keys throttled (or off)</text>
 
   <rect x="20" y="232" width="190" height="86" rx="8" fill="#eff6ff" stroke="#2563eb"/>
   <text x="32" y="252" font-size="12" font-weight="700">MCP clients (other agents)</text>
@@ -129,7 +129,7 @@
   <text x="852" y="436" font-size="10">sees the approval card: exact comment text,</text>
   <text x="852" y="449" font-size="10">PR, link, reason, who asked, expiry</text>
   <text x="852" y="465" font-size="10">decides in Slack (button) or on the web</text>
-  <text x="852" y="478" font-size="10">page (approver key). Nothing else can.</text>
+  <text x="852" y="478" font-size="10">(approver key / WEB_USERS). Nothing else can.</text>
 
   <!-- Arrows: channels to container -->
   <line x1="210" y1="75" x2="288" y2="75" stroke="#334155" stroke-width="1.5" marker-end="url(#a)"/>
@@ -176,7 +176,7 @@
   <rect x="20" y="520" width="1060" height="70" rx="8" fill="#fff7ed" stroke="#ea580c"/>
   <text x="32" y="538" font-size="12" font-weight="700" fill="#c2410c">WHERE SECRETS ARE KEPT</text>
   <text x="32" y="553" font-size="10">Platform secrets / environment variables only (<tspan font-family="Consolas, monospace">fly secrets set</tspan>, or a git-ignored <tspan font-family="Consolas, monospace">.env</tspan> locally). Never in git, never in the image, never in SQLite.</tspan></text>
-  <text x="32" y="567" font-size="10">GITHUB_TOKEN, LLM_API_KEY, SLACK_BOT_TOKEN, SLACK_APP_TOKEN, WEB_ACCESS_KEY, WEB_APPROVER_KEY, MCP_TOKENS. Approver identities: SLACK_APPROVER_USER_IDS and the web approver key.</text>
+  <text x="32" y="567" font-size="10">GITHUB_TOKEN, LLM_API_KEY, SLACK_BOT_TOKEN, SLACK_APP_TOKEN, WEB_USERS keys, WEB_ACCESS_KEY, WEB_APPROVER_KEY, MCP_TOKENS. Approver identities: SLACK_APPROVER_USER_IDS and web approver role/key.</text>
   <text x="32" y="581" font-size="10">Keys are compared in constant time, sent as Bearer headers (not URLs); MCP clients are logged by a hash of their token, not the token.</text>
 </svg>
 

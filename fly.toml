@@ -1,4 +1,4 @@
-# Fly.io config. Change `app` to a unique name before the first deploy.
+# How to run my container in Fly.io infra?
 app = "pr-triage-agent"
 primary_region = "fra"
 
