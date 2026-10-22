@@ -33,7 +33,7 @@ const queue = (over: Partial<QueueResult> = {}): QueueResult => ({
 describe("renderQueue", () => {
   it("shows state, confidence, a few facts, the unknowns, and the source link", () => {
     const t = renderQueue(queue());
-    expect(t).toContain("#7 Fix login - REVIEW NEXT (score 80, confidence medium)");
+    expect(t).toContain("#7 Fix login - needs review (score 80, confidence medium)");
     expect(t).toContain("fact 1");
     expect(t).not.toContain("fact 4"); // capped to keep chat messages short
     expect(t).toContain("? CI is unknown");
@@ -44,9 +44,9 @@ describe("renderQueue", () => {
     const t = renderQueue(
       queue({ failed: [{ number: 9, title: "Broken", sourceUrl: "https://x/9", error: "boom" }], truncated: true }),
     );
-    expect(t).toMatch(/Could not analyse 1 PR/);
+    expect(t).toMatch(/Could not analyse 1 pull request/);
     expect(t).toContain("boom");
-    expect(t).toMatch(/More open PRs exist/);
+    expect(t).toMatch(/More open pull requests exist/);
   });
 
   it("says plainly when there is nothing open", () => {

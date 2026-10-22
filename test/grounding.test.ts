@@ -19,8 +19,15 @@ describe("grounding helpers", () => {
   it("flags a number that was never fetched and appends a visible warning", () => {
     const r = checkGrounding("Review #101 and #555 first.", [101], "what first?");
     expect(r.ungrounded).toEqual([555]);
-    expect(r.text).toMatch(/Warning: I mentioned #555/);
+    expect(r.text).toMatch(/Warning: I mentioned #555, but that number is not/);
+    expect(r.text).toMatch(/Please ignore it or ask me again/);
     expect(r.text.startsWith("Review #101 and #555 first.")).toBe(true);
+  });
+
+  it("uses a plural verb when more than one number was invented", () => {
+    const r = checkGrounding("See #7 and #8.", [1], "what?");
+    expect(r.text).toMatch(/I mentioned #7, #8, but those numbers are not/);
+    expect(r.text).toMatch(/Please ignore them or ask me again/);
   });
 });
 

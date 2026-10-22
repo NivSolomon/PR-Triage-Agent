@@ -49,7 +49,7 @@ describe("renderDigest", () => {
     expect(t).toMatch(/and 1 more/);
     expect(t).toContain("Ready to merge");
     expect(t).toContain("Waiting on the author (do not review yet): #6");
-    expect(t).toContain("1 draft(s) skipped");
+    expect(t).toContain("1 draft skipped");
   });
 
   it("flags low-confidence entries and unknown CI instead of presenting them as certain", () => {
@@ -64,7 +64,7 @@ describe("renderDigest", () => {
       queue([item(1, "needs_review")], { failed: [{ number: 9, title: "x", sourceUrl: "u", error: "e" }], truncated: true }),
     );
     expect(partial).toContain("Could not analyse: #9");
-    expect(partial).toContain("More open PRs exist");
+    expect(partial).toContain("More open pull requests exist");
   });
 });
 

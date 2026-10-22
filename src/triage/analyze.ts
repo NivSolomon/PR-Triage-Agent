@@ -1,4 +1,5 @@
 import type { PrDetail } from "../github/types.js";
+import { count } from "../text/en.js";
 
 /**
  * Deterministic triage of one pull request.
@@ -120,8 +121,8 @@ function hoursBetween(fromIso: string, now: Date): number | null {
 
 function describeAge(hours: number): string {
   if (hours < 1) return "less than an hour";
-  if (hours < 48) return `${Math.round(hours)} hours`;
-  return `${Math.round(hours / 24)} days`;
+  if (hours < 48) return count(Math.round(hours), "hour");
+  return count(Math.round(hours / 24), "day");
 }
 
 type CiState = "green" | "red" | "pending" | "unknown" | "none";
@@ -209,7 +210,9 @@ export function assessPr(pr: PrDetail, now: Date = new Date()): TriageAssessment
       "ci_green",
       optionalFailing.length > 0
         ? `All required CI checks passed (optional, not blocking: ${optionalFailing.join(", ")} failing).`
-        : `All ${pr.checks?.total} CI checks passed.`,
+        : pr.checks?.total === 1
+          ? "The CI check passed."
+          : `All ${pr.checks?.total} CI checks passed.`,
       WEIGHTS.ciGreen,
     );
   } else if (ciState === "pending") {
@@ -258,9 +261,9 @@ export function assessPr(pr: PrDetail, now: Date = new Date()): TriageAssessment
   }
 
   if (lines <= THRESHOLDS.smallLines) {
-    add("small", `Small change: ${lines} ${lines === 1 ? "line" : "lines"} in ${pr.changedFiles} file(s)${skippedNote}, quick to review.`, WEIGHTS.small);
+    add("small", `Small change: ${count(lines, "line")} in ${count(pr.changedFiles, "file")}${skippedNote}, quick to review.`, WEIGHTS.small);
   } else if (lines >= THRESHOLDS.largeLines) {
-    add("large", `Large change: ${lines} ${lines === 1 ? "line" : "lines"} in ${pr.changedFiles} file(s)${skippedNote}; plan a longer review.`, WEIGHTS.large);
+    add("large", `Large change: ${count(lines, "line")} in ${count(pr.changedFiles, "file")}${skippedNote}; plan a longer review.`, WEIGHTS.large);
   }
 
   if (pr.requestedReviewers.length > 0 && !pr.draft) {
@@ -323,7 +326,7 @@ function recommend(x: {
     case "waiting_on_author":
       return `Do not review yet. Ask ${x.author} to address the blocker (failing CI, requested changes or conflicts) first.`;
     case "ready_to_merge":
-      return `Ready to merge: ${x.approvals} approval(s) on the current code, CI is fine and GitHub reports it mergeable.`;
+      return `Ready to merge: ${count(x.approvals, "approval")} on the current code, CI is fine and GitHub reports it mergeable.`;
     case "unclear":
       return "Check CI manually before reviewing; its status could not be fetched.";
     case "needs_review": {

@@ -6,13 +6,14 @@ import type { TriageAssessment, TriageState } from "../triage/analyze.js";
 import { authorNext, personalView } from "../triage/personal.js";
 import type { QueueResult } from "../triage/queue.js";
 import type { ActionRecord } from "../store/actions.js";
+import { count } from "../text/en.js";
 
 const STATE_LABEL: Record<TriageState, string> = {
-  needs_review: "REVIEW NEXT",
-  ready_to_merge: "READY TO MERGE",
-  waiting_on_author: "WAITING ON AUTHOR",
-  draft: "DRAFT",
-  unclear: "CHECK CI FIRST",
+  needs_review: "needs review",
+  ready_to_merge: "ready to merge",
+  waiting_on_author: "waiting on the author",
+  draft: "draft",
+  unclear: "check CI first",
 };
 
 const MAX_FACTS = 3;
@@ -38,23 +39,23 @@ export function renderQueue(q: QueueResult, viewer?: { login: string }): string 
     const v = personalView(q.items, viewer.login);
     const section = (title: string, items: TriageAssessment[], next: (a: TriageAssessment) => string): void => {
       if (items.length === 0) return;
-      lines.push(`== ${title} (${items.length}) ==`, ``);
+      lines.push(`${title} (${items.length}):`, ``);
       items.forEach((a, i) => lines.push(...renderItem(a, i + 1, next(a))));
     };
     lines.push(`Personal view for GitHub user ${viewer.login}.`, ``);
-    section("WAITING FOR YOUR REVIEW", v.forYou, (a) => a.recommendation);
-    if (v.forYou.length === 0) lines.push(`Nothing is waiting specifically on your review.`, ``);
-    section("YOUR PULL REQUESTS", v.yours, (a) => authorNext(a.state));
-    section("EVERYONE ELSE'S, IN QUEUE ORDER", v.others, (a) => a.recommendation);
+    section("Waiting for your review", v.forYou, (a) => a.recommendation);
+    if (v.forYou.length === 0) lines.push(`Nothing is waiting specifically for your review.`, ``);
+    section("Your pull requests", v.yours, (a) => authorNext(a.state));
+    section("Everyone else's, in queue order", v.others, (a) => a.recommendation);
   } else {
     q.items.forEach((a, i) => lines.push(...renderItem(a, i + 1, a.recommendation)));
   }
   if (q.failed.length > 0) {
-    lines.push(`Could not analyse ${q.failed.length} PR(s):`);
+    lines.push(`Could not analyse ${count(q.failed.length, "pull request")}:`);
     for (const f of q.failed) lines.push(`   - #${f.number} ${f.title}: ${f.error} ${f.sourceUrl}`);
     lines.push(``);
   }
-  if (q.truncated) lines.push(`More open PRs exist than shown; only the most recently updated were analysed.`);
+  if (q.truncated) lines.push(`More open pull requests exist than are shown; only the most recently updated were analysed.`);
   if (q.items.length > 0) lines.push(`Score: higher means review sooner. Confidence: how complete the GitHub data was, not a prediction.`);
   return lines.join("\n").trim();
 }

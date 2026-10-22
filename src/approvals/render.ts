@@ -8,7 +8,7 @@ export function renderApprovalCard(a: ActionRecord): string {
   return [
     `Approval needed (#${a.id.slice(0, 8)})`,
     ``,
-    `Action: post ONE public comment on pull request #${a.prNumber}`,
+    `Action: post one public comment on pull request #${a.prNumber}`,
     `PR: ${a.prTitle}`,
     `Link: ${a.prUrl}`,
     ``,
@@ -29,7 +29,7 @@ export function renderApprovalCard(a: ActionRecord): string {
     `Requested by ${a.requestedBy} via ${a.requestedVia}`,
     `Expires: ${a.expiresAt}`,
     ``,
-    `Nothing else will change. Without your approval nothing is posted.`,
+    `Nothing else will change. Without your approval, nothing is posted.`,
   ].join("\n");
 }
 
@@ -43,9 +43,9 @@ export function renderOutcome(a: ActionRecord): string {
     case "expired":
       return `This request expired. Nothing was posted on #${a.prNumber}.`;
     case "failed":
-      return `Approved, but the comment was NOT posted: ${a.error ?? "unknown error"} You can propose it again.`;
+      return `Approved, but the comment was not posted: ${a.error ?? "unknown error"}. You can propose it again.`;
     case "uncertain":
-      return `Approved, but I could not confirm the result: ${a.error ?? ""} Please check ${a.prUrl} before trying again.`;
+      return `Approved, but I could not confirm the result: ${a.error ?? "the outcome is unknown"}. Please check ${a.prUrl} before trying again.`;
     case "executing":
       return `Posting the comment on #${a.prNumber}…`;
     case "pending":

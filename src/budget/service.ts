@@ -112,7 +112,7 @@ export class BudgetService {
         level: "blocked",
         reason: "monthly_budget",
         message:
-          "The monthly AI budget is used up, so I can't run new analyses with the model until next month. " +
+          "The monthly AI budget is used up, so I cannot run new analyses with the model until next month. " +
           "The ranked review queue (/triage queue) still works because it uses no AI credit.",
         summary,
       };

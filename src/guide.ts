@@ -39,7 +39,7 @@ export function buildGuide(audience: GuideAudience, opts: GuideOptions): Guide {
     "See the open pull requests ranked by what to review first, with the reasons, a confidence level and a link to each (no AI credit used).",
     "Ask in plain language: what is blocked and why, what is ready to merge, what is stale, what one PR is about, its CI status, reviews and branches.",
     "Ask for a comment to be left on a pull request. The agent only drafts it: nothing is posted until an approver approves it (an approver may correct the wording first).",
-    "Read the morning digest the agent sends on weekdays without being asked (in the team's digest channel, or as a direct message to approvers). You can also ask for it any time.",
+    "Read the morning digest the agent sends on weekdays without being asked (in the team's digest channel, or as a direct message to approvers). You can also ask for it at any time.",
   ];
   if (approver) {
     can.push(`Approve or reject a comment request: ${where}. Approving asks you to confirm once more, because a public comment cannot be unposted.`);

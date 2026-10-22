@@ -36,10 +36,11 @@ export function checkGrounding(answer: string, fetched: Iterable<number>, userTe
   const ungrounded = mentionedNumbers(answer).filter((n) => !known.has(n));
   if (ungrounded.length === 0) return { ungrounded, text: answer };
   const list = ungrounded.map((n) => `#${n}`).join(", ");
+  const one = ungrounded.length === 1;
   return {
     ungrounded,
     text:
-      `${answer}\n\nWarning: I mentioned ${list}, but that is not in the data I fetched from GitHub for this question. ` +
-      `Please ignore it or ask me again.`,
+      `${answer}\n\nWarning: I mentioned ${list}, but ${one ? "that number is" : "those numbers are"} not in the data I fetched from GitHub for this question. ` +
+      `Please ignore ${one ? "it" : "them"} or ask me again.`,
   };
 }

@@ -165,7 +165,7 @@ describe("failure halfway through an approved action", () => {
     const done = await service.approve(a.id, APPROVER);
     expect(done.status).toBe("failed");
     expect(github.findCommentWithMarker).not.toHaveBeenCalled();
-    expect(renderOutcome(done)).toMatch(/NOT posted/);
+    expect(renderOutcome(done)).toMatch(/was not posted/);
   });
 
   it("detects that the comment DID land when the response was lost (no duplicate)", async () => {

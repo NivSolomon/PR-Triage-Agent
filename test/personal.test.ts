@@ -75,9 +75,9 @@ describe("renderQueue with a viewer", () => {
 
   it("with a viewer it groups what is waiting on them, then their own, then the rest", () => {
     const text = renderQueue(q, { login: "lee" });
-    expect(text).toMatch(/WAITING FOR YOUR REVIEW \(1\)/);
-    expect(text).toMatch(/YOUR PULL REQUESTS \(1\)/);
-    expect(text).toMatch(/EVERYONE ELSE'S, IN QUEUE ORDER \(1\)/);
+    expect(text).toMatch(/Waiting for your review \(1\)/);
+    expect(text).toMatch(/Your pull requests \(1\)/);
+    expect(text).toMatch(/Everyone else's, in queue order \(1\)/);
     expect(text.indexOf("#1 ")).toBeLessThan(text.indexOf("#3 "));
     expect(text.indexOf("#3 ")).toBeLessThan(text.indexOf("#6 "));
     expect(text).toMatch(/Your move: fix the blocker/);
@@ -85,7 +85,7 @@ describe("renderQueue with a viewer", () => {
 
   it("says plainly when nothing is waiting on the viewer", () => {
     expect(renderQueue(queue([item(6, "dana", "needs_review")]), { login: "lee" })).toMatch(
-      /Nothing is waiting specifically on your review/,
+      /Nothing is waiting specifically for your review/,
     );
   });
 });

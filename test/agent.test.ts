@@ -157,7 +157,7 @@ describe("Agent loop", () => {
     });
     const res = await agent.ask(ask("hi"));
     expect(res.refusedBecause).toBe("model_unavailable");
-    expect(res.text).toMatch(/couldn't reach the AI model/);
+    expect(res.text).toMatch(/could not reach the AI model/);
   });
 
   it("rejects over-long input without calling the model", async () => {
@@ -255,10 +255,14 @@ describe("Tools and permissions", () => {
   });
 
   it("the prompt keeps the model from guessing what changed or why CI failed, and points it at the branch fields", () => {
-    const p = systemPrompt({ repo: "acme/app", now: new Date("2026-10-21T00:00:00Z"), economy: false, canPropose: true });
+    const p = systemPrompt({ repo: "acme/app", now: new Date("2026-10-21T00:00:00Z"), economy: false, canPropose: true, locale: "en" });
     expect(p).toMatch(/cannot see the code diff/);
     expect(p).toMatch(/never name a cause/i);
     expect(p).toMatch(/headBranch/);
     expect(p).toMatch(/Branch names are chosen by the author/);
+    expect(p).toMatch(/Reply in English/);
+    expect(p).toMatch(/subject-verb agreement/);
+    expect(p).toMatch(/1 pull request/);
+    expect(p).toMatch(/never "PR\(s\)"/);
   });
 });

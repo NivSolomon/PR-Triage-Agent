@@ -9,6 +9,7 @@ import {
   decidedBlocks,
   editModal,
   explainSlackError,
+  incomingDirectMessage,
   slackActor,
   slackSafe,
 } from "../src/channels/slack.js";
@@ -117,7 +118,7 @@ describe("approvalBlocks", () => {
   it("shows the facts on separate lines and the exact comment in a code block", () => {
     const sections = textOf(approvalBlocks(record({ body: "Line one\nLine two" })));
     const all = sections.join("\n");
-    expect(all).toContain("*Action:* post ONE public comment on pull request #7");
+    expect(all).toContain("*Action:* post one public comment on pull request #7");
     expect(all).toContain("```Line one\nLine two```");
     expect(all).toMatch(/\*Requested by\* slack:U0ASKER via slack/);
   });
@@ -361,6 +362,50 @@ describe("direct messages and mentions", () => {
     expect(said).not.toMatch(/secret/);
   });
 
+  it("treats an edited DM as a new question (Slack does not re-send the original event)", async () => {
+    const incoming = incomingDirectMessage({
+      channel: "D0ALICE",
+      channel_type: "im",
+      subtype: "message_changed",
+      message: { user: "U0ALICE", text: "leave a comment on #7 asking to fix CI" },
+      previous_message: { text: "hello" },
+    });
+    expect(incoming).toEqual({ userId: "U0ALICE", channel: "D0ALICE", text: "leave a comment on #7 asking to fix CI" });
+    const s = setup();
+    await s.channel.handleMessage(incoming!);
+    expect(s.agent.ask).toHaveBeenCalledWith(expect.objectContaining({ text: "leave a comment on #7 asking to fix CI" }));
+  });
+
+  it("ignores DM edits that did not change the text, bot edits, and channel messages", () => {
+    expect(
+      incomingDirectMessage({
+        channel: "D0ALICE",
+        channel_type: "im",
+        subtype: "message_changed",
+        message: { user: "U0ALICE", text: "same" },
+        previous_message: { text: "same" },
+      }),
+    ).toBeNull();
+    expect(
+      incomingDirectMessage({
+        channel: "D0ALICE",
+        channel_type: "im",
+        subtype: "message_changed",
+        message: { user: "U0BOT", text: "updated card", bot_id: "B01" },
+        previous_message: { text: "old card" },
+      }),
+    ).toBeNull();
+    expect(
+      incomingDirectMessage({
+        channel: "C0TEAM",
+        channel_type: "channel",
+        subtype: "message_changed",
+        message: { user: "U0ALICE", text: "<@U0BOT> now asking about #7" },
+        previous_message: { text: "unrelated" },
+      }),
+    ).toBeNull();
+  });
+
   it("handles one question at a time per person", async () => {
     let release: () => void = () => undefined;
     const gate = new Promise<void>((r) => (release = r));
@@ -581,7 +626,7 @@ describe("editing the comment before posting (Slack)", () => {
     const gone = setup({ approvals: { approve: vi.fn(), reject: vi.fn(), listPending: vi.fn(() => []), get: vi.fn(() => null) } });
     const b = await open(gone, "U0BOSS");
     expect(b.opened).toHaveLength(0);
-    expect(b.notices.join()).toMatch(/can't find/);
+    expect(b.notices.join()).toMatch(/cannot find that request/);
   });
 
   const submit = async (s: ReturnType<typeof setup>, userId: string, editedBody: string) => {

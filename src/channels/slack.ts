@@ -11,6 +11,8 @@ import type { ActionRecord } from "../store/actions.js";
 import { renderDigest } from "../scheduler/digest.js";
 import { homeBlocks, homeDeniedBlocks } from "./slackHome.js";
 import { slackSafe } from "./slack-text.js";
+import { withChatDirection } from "../i18n/locale.js";
+import { count } from "../text/en.js";
 import { buildQueue } from "../triage/queue.js";
 import { decide, renderBudget, renderQueue, splitMessage } from "./shared.js";
 import type { DecisionKind } from "./shared.js";
@@ -26,6 +28,44 @@ export const EDIT_VIEW = "edit_comment";
 const COMMENT_MAX = 2000;
 
 export const slackActor = (userId: string): string => `slack:${userId}`;
+
+/** Shape of a Slack `message` event, including an edit (`subtype: message_changed`). */
+export interface SlackMessageEvent {
+  channel?: string;
+  channel_type?: string;
+  subtype?: string;
+  bot_id?: string;
+  user?: string;
+  user_team?: string;
+  text?: string;
+  message?: { user?: string; text?: string; bot_id?: string; subtype?: string };
+  previous_message?: { text?: string };
+}
+
+/**
+ * A DM we should answer, or null to ignore (bots, joins, deletes, unchanged edits).
+ * Slack delivers an *edit* as a different event (`message_changed`); Bolt's `app.message` skips those,
+ * so callers must listen to `message` itself.
+ */
+export function incomingDirectMessage(
+  event: SlackMessageEvent | unknown,
+): { userId: string; teamId?: string; channel: string; text: string } | null {
+  if (!event || typeof event !== "object") return null;
+  const e = event as SlackMessageEvent;
+  if (e.channel_type !== "im" || !e.channel) return null;
+
+  if (e.subtype === "message_changed") {
+    const inner = e.message;
+    if (!inner || inner.bot_id || inner.subtype || !inner.user || !inner.text) return null;
+    const next = inner.text.trim();
+    const prev = (e.previous_message?.text ?? "").trim();
+    if (!next || next === prev) return null;
+    return { userId: inner.user, teamId: e.user_team, channel: e.channel, text: inner.text };
+  }
+
+  if (e.subtype || e.bot_id || !e.user || !e.text) return null;
+  return { userId: e.user, teamId: e.user_team, channel: e.channel, text: e.text };
+}
 
 export { slackSafe };
 
@@ -61,7 +101,7 @@ class BoltSlackApi implements SlackApi {
   async post(target: string, text: string, opts: { threadTs?: string; blocks?: KnownBlock[] } = {}): Promise<string | undefined> {
     const res = await this.client.chat.postMessage({
       channel: await this.resolve(target),
-      text: slackSafe(text), // with blocks, this is only the notification fallback
+      text: withChatDirection(slackSafe(text)), // LTR/RTL mark so English stays left-to-right even next to a Hebrew title
       ...(opts.blocks ? { blocks: opts.blocks } : {}),
       ...(opts.threadTs ? { thread_ts: opts.threadTs } : {}),
       mrkdwn: false,
@@ -76,7 +116,7 @@ class BoltSlackApi implements SlackApi {
   }
 
   async update(channel: string, ts: string, text: string, blocks: KnownBlock[]): Promise<void> {
-    await this.client.chat.update({ channel, ts, text: slackSafe(text), blocks });
+    await this.client.chat.update({ channel, ts, text: withChatDirection(slackSafe(text)), blocks });
   }
 
   async publishHome(userId: string, blocks: KnownBlock[]): Promise<void> {
@@ -132,7 +172,7 @@ export function approvalBlocks(a: ActionRecord): KnownBlock[] {
   const head = [
     `*Approval needed* (#${a.id.slice(0, 8)})`,
     ``,
-    `*Action:* post ONE public comment on pull request #${a.prNumber}`,
+    `*Action:* post one public comment on pull request #${a.prNumber}`,
     `*PR:* ${slackSafe(a.prTitle)}`,
     `*Link:* ${slackSafe(a.prUrl)}`,
   ].join("\n");
@@ -150,7 +190,7 @@ export function approvalBlocks(a: ActionRecord): KnownBlock[] {
     `*Requested by* ${slackSafe(a.requestedBy)} via ${slackSafe(a.requestedVia)}`,
     `*Expires:* ${slackSafe(a.expiresAt)}`,
     ``,
-    `_Nothing else will change. Without your approval nothing is posted._`,
+    `_Nothing else will change. Without your approval, nothing is posted._`,
   ].join("\n");
   return [
     mrkdwn(head),
@@ -268,11 +308,11 @@ export function helpText(isApprover: boolean): string {
     "",
     renderGuideText(buildGuide(isApprover ? "approver" : "requester", { channel: "slack" })),
     "",
-    "How to talk to me: message me directly (the app's Messages tab) and your questions and my answers stay in the conversation. In a channel, @mention me and I reply in a thread.",
+    "How to talk to me: message me directly (the app's Messages tab). Your questions and my answers stay in the conversation. In a channel, @mention me and I reply in a thread.",
     "Examples:",
     "- What should we review first?",
     "- Why is #12 blocked?",
-    "- Leave a comment on #12 asking the author to fix CI (an approver must approve it first)",
+    "- Leave a comment on #12 asking the author to fix CI. An approver must approve it first.",
     "",
     "Quick commands (replies are private to you and temporary):",
     "/triage queue - ranked review queue (no AI credit used)",
@@ -419,14 +459,14 @@ export class SlackChannel {
         const text = renderQueue(await buildQueue(this.d.github), login ? { login } : undefined);
         await say(login || !this.hasGithubMap() ? text : `${text}\n\n${this.UNLINKED_TIP}`);
       } catch (err) {
-        await say(`I couldn't load the queue: ${err instanceof Error ? err.message : "unknown error"}`);
+        await say(`I could not load the queue: ${err instanceof Error ? err.message : "unknown error"}`);
       }
     });
     if (isCommand && word === "digest") return this.guarded(p.userId, say, async () => {
       try {
         await say(renderDigest(await buildQueue(this.d.github)));
       } catch (err) {
-        await say(`I couldn't build the digest: ${err instanceof Error ? err.message : "unknown error"}`);
+        await say(`I could not build the digest: ${err instanceof Error ? err.message : "unknown error"}`);
       }
     });
     if (isCommand && word === "budget") return say(renderBudget(this.d.budget.summary()));
@@ -464,7 +504,7 @@ export class SlackChannel {
     // A visible "working" note, replaced by the answer. Failing to show it must never block the answer.
     let placeholder: string | undefined;
     try {
-      placeholder = await api.post(p.channel, "Looking at the pull requests...", opts);
+      placeholder = await api.post(p.channel, "Looking at the pull requests…", opts);
     } catch {
       placeholder = undefined;
     }
@@ -501,7 +541,7 @@ export class SlackChannel {
   }): Promise<void> {
     if (!this.isApprover(slackActor(p.userId))) return p.notice("Only approvers can do that.");
     const record = this.d.approvals.get(p.id);
-    if (!record) return p.notice("I can't find that request any more.");
+    if (!record) return p.notice("I cannot find that request any more.");
     if (record.status !== "pending") return p.notice(renderOutcome(record));
     await p.open(editModal(record, { channel: p.channel, ts: p.ts }));
   }
@@ -581,13 +621,13 @@ export class SlackChannel {
         blocks: approvalBlocks(a),
       });
     }
-    return say(`Sent ${list.length} approval card(s) to your direct messages with me.`);
+    return say(`Sent ${count(list.length, "approval card")} to your direct messages with me.`);
   }
 
   /** One slow thing at a time per person (each model call costs money). */
   private async guarded(userId: string, say: (text: string) => Promise<void>, fn: () => Promise<void>): Promise<void> {
     const key = `cmd:${userId}`;
-    if (this.busy.has(key)) return say("Still working on your last command.");
+    if (this.busy.has(key)) return say("I am still working on your last command.");
     this.busy.add(key);
     try {
       await fn();
@@ -605,7 +645,7 @@ export class SlackChannel {
   }): Promise<void> {
     const key = `ask:${p.userId}`;
     if (this.busy.has(key)) {
-      await p.say("I'm still working on your previous question. One moment.");
+      await p.say("I am still working on your previous question. Please wait a moment.");
       return;
     }
     this.busy.add(key);
@@ -625,7 +665,7 @@ export class SlackChannel {
         await p.say(
           n > 0
             ? `Sent for approval (#${record.id.slice(0, 8)}). Nothing is posted until an approver approves it.`
-            : `Created request #${record.id.slice(0, 8)}, but I could not reach any approver on Slack. It stays pending for 24h and can be approved from the web page. Nothing is posted yet.`,
+            : `Created request #${record.id.slice(0, 8)}, but I could not reach any approver on Slack. It stays pending for 24 hours and can be approved from the web page. Nothing is posted yet.`,
         );
       }
     } catch (err) {
@@ -695,11 +735,11 @@ export class SlackChannel {
       );
     });
 
-    app.message(async ({ message }) => {
-      const m = message as { user?: string; user_team?: string; text?: string; channel: string; channel_type?: string; subtype?: string; bot_id?: string };
-      // Only direct messages from people (never our own or other bots' messages, edits, joins...).
-      if (m.channel_type !== "im" || m.subtype || m.bot_id || !m.user || !m.text) return;
-      void this.handleMessage({ userId: m.user, teamId: m.user_team, channel: m.channel, text: m.text }).catch((err) =>
+    // `app.message` skips edits (they arrive as subtype message_changed). Listen to the raw event instead.
+    app.event("message", async ({ event }) => {
+      const incoming = incomingDirectMessage(event);
+      if (!incoming) return;
+      void this.handleMessage(incoming).catch((err) =>
         console.error("Slack message failed:", err instanceof Error ? err.message : err),
       );
     });

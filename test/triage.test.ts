@@ -96,6 +96,12 @@ describe("assessPr: required vs optional CI, and size", () => {
     expect(small?.text).toMatch(/4070 more lines of lock\/generated/);
   });
 
+  it("uses a real English plural for one line in one file, not file(s)", () => {
+    const a = assessPr(pr({ additions: 1, deletions: 0, changedFiles: 1, reviewableLines: 1 }), NOW);
+    expect(a.signals.find((s) => s.code === "small")?.text).toBe("Small change: 1 line in 1 file, quick to review.");
+    expect(JSON.stringify(a.signals)).not.toMatch(/\(s\)/);
+  });
+
   it("falls back to the raw total when per-file data is unavailable", () => {
     const a = assessPr(pr({ additions: 4000, deletions: 100, reviewableLines: null }), NOW);
     expect(a.signals.some((s) => s.code === "large")).toBe(true);

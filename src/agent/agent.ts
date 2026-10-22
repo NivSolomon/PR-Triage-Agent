@@ -4,6 +4,9 @@ import type { ActionRecord } from "../store/actions.js";
 import type { ChatMessage, LlmPort, ToolCall } from "./llm.js";
 import { checkGrounding, numbersInToolOutput } from "./grounding.js";
 import { toPlainText } from "./plain.js";
+import { t } from "../i18n/catalog.js";
+import { resolveLocale } from "../i18n/locale.js";
+import type { Locale } from "../i18n/locale.js";
 import { systemPrompt } from "./prompt.js";
 import { runTool, toolsFor } from "./tools.js";
 import type { ToolContext, ToolDeps } from "./tools.js";
@@ -28,6 +31,8 @@ export interface AskInput {
   githubLogin?: string;
   /** Counted separately in the budget log, e.g. "chat" or "digest". */
   purpose?: string;
+  /** UI language, used when the question itself has no language (a PR number, a slash command). */
+  locale?: Locale;
 }
 
 export interface AskResult {
@@ -57,9 +62,10 @@ export class Agent {
 
   async ask(input: AskInput): Promise<AskResult> {
     const text = input.text.trim();
+    const locale = resolveLocale(text, input.locale);
     if (text.length > MAX_INPUT_CHARS) {
       return {
-        text: `That message is too long (${text.length} characters; the limit is ${MAX_INPUT_CHARS}). Please shorten it.`,
+        text: t(locale, "agent.tooLong", { length: text.length, limit: MAX_INPUT_CHARS }),
         proposed: [],
         refusedBecause: "too_long",
       };
@@ -69,7 +75,10 @@ export class Agent {
     if (!gate.allowed) {
       await this.maybeAlert();
       return {
-        text: gate.message,
+        text:
+          gate.reason === "daily_limit"
+            ? t(locale, "agent.daily", { n: gate.message.match(/\d+/)?.[0] ?? "" })
+            : t(locale, "agent.budget"),
         proposed: [],
         refusedBecause: gate.reason as "monthly_budget" | "daily_limit",
       };
@@ -90,7 +99,7 @@ export class Agent {
 
     const prior = this.history.get(input.conversationId) ?? [];
     const messages: ChatMessage[] = [
-      { role: "system", content: systemPrompt({ repo: this.o.tools.github.repo, now: this.now(), economy, canPropose: input.canPropose }) },
+      { role: "system", content: systemPrompt({ repo: this.o.tools.github.repo, now: this.now(), economy, canPropose: input.canPropose, locale }) },
       ...prior,
       { role: "user", content: text },
     ];
@@ -116,7 +125,7 @@ export class Agent {
         });
 
         if (res.toolCalls.length === 0) {
-          answer = (res.content ?? "").trim() || "I could not produce an answer. Please try rephrasing.";
+          answer = (res.content ?? "").trim() || t(locale, "agent.noAnswer");
           break;
         }
 
@@ -130,14 +139,14 @@ export class Agent {
     } catch (err) {
       console.error("LLM call failed:", err instanceof Error ? err.message : err);
       return {
-        text: "I couldn't reach the AI model just now, so I can't answer that. Please try again in a minute; the ranked queue (/triage queue) still works.",
+        text: t(locale, "agent.modelDown"),
         proposed,
         refusedBecause: "model_unavailable",
       };
     }
 
     const plain = toPlainText(
-      answer ?? "I ran out of steps before I could answer. Please ask a narrower question.",
+      answer ?? t(locale, "agent.outOfSteps"),
     );
     const grounding = checkGrounding(plain, fetched, text);
     if (grounding.ungrounded.length > 0) {

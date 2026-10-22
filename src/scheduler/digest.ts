@@ -4,6 +4,7 @@ import type { RunRepository } from "../store/runs.js";
 import type { TriageAssessment } from "../triage/analyze.js";
 import { buildQueue } from "../triage/queue.js";
 import type { QueueResult } from "../triage/queue.js";
+import { count } from "../text/en.js";
 
 const TOP_N = 3;
 
@@ -33,7 +34,7 @@ export function renderDigest(q: QueueResult): string {
   if (review.length > 0) {
     lines.push(`Review first (${review.length} waiting):`);
     review.slice(0, TOP_N).forEach((a) => lines.push(brief(a)));
-    if (review.length > TOP_N) lines.push(`  ...and ${review.length - TOP_N} more. Send /triage queue for the full list.`);
+    if (review.length > TOP_N) lines.push(`  ...and ${count(review.length - TOP_N, "more", "more")}. Send /triage queue for the full list.`);
     lines.push(``);
   } else {
     lines.push(`Nothing is waiting on a reviewer right now.`, ``);
@@ -49,11 +50,11 @@ export function renderDigest(q: QueueResult): string {
   if (unclear.length > 0) {
     lines.push(`CI status unknown, check by hand: ${unclear.map((a) => `#${a.number}`).join(", ")}`, ``);
   }
-  if (drafts.length > 0) lines.push(`${drafts.length} draft(s) skipped.`, ``);
+  if (drafts.length > 0) lines.push(`${count(drafts.length, "draft")} skipped.`, ``);
   if (q.failed.length > 0) {
     lines.push(`Could not analyse: ${q.failed.map((f) => `#${f.number}`).join(", ")} (GitHub lookup failed).`, ``);
   }
-  if (q.truncated) lines.push(`More open PRs exist than were analysed.`);
+  if (q.truncated) lines.push(`More open pull requests exist than were analysed.`);
   return lines.join("\n").trim();
 }
 
