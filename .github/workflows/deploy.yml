@@ -1,0 +1,48 @@
+name: Deploy to Fly.io
+
+# Runs after CI succeeds on main, so a failing typecheck or test never reaches production.
+# Can also be started by hand from the Actions tab (re-deploy / roll forward).
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One deploy at a time: the app is a single machine with a SQLite volume.
+concurrency:
+  group: fly-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      FLY_APP: pr-triage-agent
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Deploy exactly the commit CI tested.
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: Deploy
+        run: flyctl deploy --remote-only --app "$FLY_APP"
+
+      - name: Health check
+        run: |
+          for i in $(seq 1 12); do
+            if curl -fsS "https://$FLY_APP.fly.dev/healthz"; then
+              echo; echo "Healthy after attempt $i"; exit 0
+            fi
+            echo "Not healthy yet (attempt $i), retrying in 10s..."; sleep 10
+          done
+          echo "Health check failed. Roll back with: fly releases, then fly deploy --image <previous image>"
+          exit 1

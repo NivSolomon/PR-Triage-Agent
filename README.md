@@ -125,6 +125,17 @@ fly status && curl https://<your-app>.fly.dev/healthz
 Keep it running for the review period: `fly status` should show 1 machine started, and the volume keeps the approvals
 and usage history across restarts.
 
+### CI/CD (GitHub Actions)
+
+- `.github/workflows/ci.yml` runs `npm run typecheck` and `npm test` on every pull request and every push to `main`.
+  (`npm run evals` calls the LLM, so it is run by hand.)
+- `.github/workflows/deploy.yml` runs `fly deploy` after CI succeeds on `main`, then polls `/healthz`. It can also be
+  started by hand from the Actions tab.
+- One-time setup: `fly tokens create deploy`, then add the output as the repo secret `FLY_API_TOKEN`
+  (GitHub → Settings → Secrets and variables → Actions). Runtime secrets stay in `fly secrets`.
+- Recommended: protect `main` (Settings → Branches) and require the `test` check to pass before merging.
+- Rollback: `fly releases`, then `fly deploy --image <previous image>`.
+
 ### Any Docker host
 
 ```bash
