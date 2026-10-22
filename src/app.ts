@@ -13,6 +13,7 @@ import type { SchedulerHandle } from "./scheduler/digest.js";
 import { createWebApp } from "./web/server.js";
 import { ActionRepository } from "./store/actions.js";
 import { openDatabase } from "./store/db.js";
+import { RunRepository } from "./store/runs.js";
 
 const WEB_APPROVER_ACTOR = "web:approver";
 
@@ -92,7 +93,20 @@ export function createApp(config: Config): App {
     else await slack.notifyApprovers(text);
   };
 
+  const runs = new RunRepository(db);
+  // The schedule starts later (in start()), after the web app exists, so the page reads the next run through this.
+  let schedule: SchedulerHandle | undefined;
+
   const web = createWebApp({
+    digest: {
+      cron: config.DIGEST_CRON,
+      timezone: process.env.TZ || Intl.DateTimeFormat().resolvedOptions().timeZone,
+      target: config.SLACK_DIGEST_CHANNEL_ID
+        ? "the team's Slack digest channel"
+        : "a Slack direct message to each approver",
+      nextRun: () => schedule?.nextRun() ?? null,
+      runs,
+    },
     users: config.WEB_USERS,
     trustProxy: config.TRUST_PROXY,
     maxFailures: config.AUTH_MAX_FAILURES,
@@ -125,7 +139,6 @@ export function createApp(config: Config): App {
     },
   });
   let server: Server | undefined;
-  let schedule: SchedulerHandle | undefined;
 
   return {
     config,
@@ -136,7 +149,7 @@ export function createApp(config: Config): App {
     slack,
     async start() {
       // Validates the cron expression first, so a typo stops startup instead of never firing.
-      schedule = startDigestSchedule(config.DIGEST_CRON, () => runDigest({ github, send: sendToTeam }));
+      schedule = startDigestSchedule(config.DIGEST_CRON, () => runDigest({ github, send: sendToTeam, runs }));
       await new Promise<void>((resolve, reject) => {
         server = web.listen(config.PORT, () => resolve());
         server.once("error", reject);

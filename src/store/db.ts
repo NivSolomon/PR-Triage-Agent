@@ -46,6 +46,18 @@ const MIGRATIONS: string[] = [
   // When an approver edits the text, `body` becomes what was posted and the draft that was shown to
   // them (the agent's or the requester's) is kept here. NULL means the text was posted unchanged.
   `ALTER TABLE pending_actions ADD COLUMN original_body TEXT;`,
+  // One row per run of a scheduled task (the morning digest). Lets the web page show whether the schedule
+  // fired, whether it worked and what was sent, instead of that living only in a log line and a Slack message.
+  `CREATE TABLE scheduler_runs (
+     id          INTEGER PRIMARY KEY AUTOINCREMENT,
+     task        TEXT NOT NULL,
+     started_at  TEXT NOT NULL,
+     finished_at TEXT NOT NULL,
+     ok          INTEGER NOT NULL,
+     error       TEXT,
+     text        TEXT NOT NULL DEFAULT ''
+   );
+   CREATE INDEX idx_runs_task ON scheduler_runs(task, id);`,
 ];
 
 export function openDatabase(path: string): DatabaseSync {

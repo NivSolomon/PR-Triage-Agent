@@ -5,7 +5,9 @@ import { ApprovalService } from "../src/approvals/service.js";
 import { BudgetService } from "../src/budget/service.js";
 import { ActionRepository } from "../src/store/actions.js";
 import { openDatabase } from "../src/store/db.js";
+import type { RunRecord } from "../src/store/runs.js";
 import { createWebApp } from "../src/web/server.js";
+import type { DigestInfo } from "../src/web/server.js";
 import { SessionStore } from "../src/web/sessions.js";
 import { APP_JS, INDEX_HTML } from "../src/web/ui.js";
 
@@ -27,7 +29,7 @@ const USERS = [
 ];
 
 async function start(
-  over: { accessKey?: string; approverKey?: string; users?: typeof USERS; trustProxy?: number; sessions?: SessionStore; maxFailures?: number } = {
+  over: { accessKey?: string; approverKey?: string; users?: typeof USERS; trustProxy?: number; sessions?: SessionStore; maxFailures?: number; digest?: DigestInfo } = {
     accessKey: READER,
     approverKey: APPROVER,
   },
@@ -408,6 +410,68 @@ describe("guide", () => {
     for (const g of [reader, approver]) {
       expect(JSON.stringify(g)).toMatch(/never posts, merges, closes, approves or edits/i);
     }
+  });
+});
+
+describe("scheduled digest status", () => {
+  const run = (over: Partial<RunRecord> = {}): RunRecord => ({
+    id: 1,
+    task: "digest",
+    startedAt: "2026-10-22T05:30:00.000Z",
+    finishedAt: "2026-10-22T05:30:02.000Z",
+    ok: true,
+    error: null,
+    text: "PR digest for acme/app",
+    ...over,
+  });
+  const info = (runs: RunRecord[], nextRun: Date | null = new Date("2026-10-23T05:30:00.000Z")): DigestInfo => ({
+    cron: "30 8 * * 1-5",
+    timezone: "Asia/Jerusalem",
+    target: "Slack digest channel",
+    nextRun: () => nextRun,
+    runs: { recent: vi.fn(() => runs) },
+  });
+
+  it("needs a key, like every other API route", async () => {
+    const { call } = await start({ accessKey: READER, approverKey: APPROVER, digest: info([]) });
+    expect((await call("/api/digest")).status).toBe(401);
+  });
+
+  it("shows the schedule, the next run, where it goes and the recorded runs, to a reader too", async () => {
+    const runs = [run({ id: 2 }), run({ id: 1, ok: false, error: "GitHub rate limit reached.", text: "" })];
+    const { call } = await start({ accessKey: READER, approverKey: APPROVER, digest: info(runs) });
+    const res = await call("/api/digest", { key: READER });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body).toMatchObject({
+      enabled: true,
+      cron: "30 8 * * 1-5",
+      schedule: "Weekdays at 08:30",
+      timezone: "Asia/Jerusalem",
+      target: "Slack digest channel",
+      nextRun: "2026-10-23T05:30:00.000Z",
+    });
+    expect(body.runs).toHaveLength(2);
+    expect(body.runs[0]).toMatchObject({ ok: true, text: "PR digest for acme/app" });
+    expect(body.runs[1]).toMatchObject({ ok: false, error: "GitHub rate limit reached." });
+  });
+
+  it("says there is no next run when the schedule is not running, and has no way to trigger a run", async () => {
+    const { call } = await start({ accessKey: READER, approverKey: APPROVER, digest: info([], null) });
+    expect((await (await call("/api/digest", { key: READER })).json()).nextRun).toBeNull();
+    // Read-only on purpose: a run posts to the team channel, so the web page cannot start one.
+    expect((await call("/api/digest", { key: APPROVER, method: "POST", body: {} })).status).toBe(404);
+  });
+
+  it("reports enabled: false when no digest is configured", async () => {
+    const { call } = await start();
+    expect(await (await call("/api/digest", { key: READER })).json()).toEqual({ enabled: false });
+  });
+
+  it("the page shows it with text only, and refreshes it from the local database", () => {
+    expect(INDEX_HTML).toContain('id="digestPanel"');
+    expect(APP_JS).toMatch(/api\("\/api\/digest"\)/);
+    expect(APP_JS).toMatch(/pre\.textContent = /);
   });
 });
 

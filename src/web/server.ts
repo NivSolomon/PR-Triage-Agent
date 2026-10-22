@@ -10,7 +10,10 @@ import { decide, renderQueue } from "../channels/shared.js";
 import { buildGuide } from "../guide.js";
 import type { DecisionResult } from "../channels/shared.js";
 import type { GitHubClient } from "../github/client.js";
+import { DIGEST_TASK } from "../scheduler/digest.js";
+import { describeCron } from "../scheduler/describe.js";
 import type { ActionRecord } from "../store/actions.js";
+import type { RunRepository } from "../store/runs.js";
 import { buildQueue } from "../triage/queue.js";
 import type { QueueResult } from "../triage/queue.js";
 import { SessionStore } from "./sessions.js";
@@ -73,6 +76,21 @@ export interface WebDeps {
   onDecided?: (result: DecisionResult) => Promise<void> | void;
   /** Mount extra routes (the MCP endpoint) before the final error handler. */
   mount?: (app: express.Express) => void;
+  /** The scheduled digest, shown read-only so anyone can see that it ran. Omit to hide the panel's data. */
+  digest?: DigestInfo;
+}
+
+/** What the page needs to show about the scheduled digest. It can only read; it cannot trigger a run. */
+export interface DigestInfo {
+  /** Cron expression, as configured (DIGEST_CRON). */
+  cron: string;
+  /** Time zone the expression is evaluated in. */
+  timezone: string;
+  /** Where the digest is delivered, in words (for people who are not in that channel). */
+  target: string;
+  /** Next firing time; null if the schedule is not running. Read live because the schedule starts after the web app is built. */
+  nextRun: () => Date | null;
+  runs: Pick<RunRepository, "recent">;
 }
 
 const chatBody = z.object({
@@ -279,6 +297,25 @@ export function createWebApp(deps: WebDeps): express.Express {
   });
 
   api.get("/budget", (_req, res) => void res.json(deps.budget.summary()));
+
+  // Read-only: whether the scheduled digest ran, how it went and what it sent. Same for every role.
+  api.get("/digest", (_req, res) => {
+    const d = deps.digest;
+    if (!d) {
+      res.json({ enabled: false });
+      return;
+    }
+    res.json({
+      enabled: true,
+      cron: d.cron,
+      /** The same schedule in words, e.g. "Weekdays at 08:30". The raw cron stays available for tooltips. */
+      schedule: describeCron(d.cron),
+      timezone: d.timezone,
+      target: d.target,
+      nextRun: d.nextRun()?.toISOString() ?? null,
+      runs: d.runs.recent(DIGEST_TASK, 10),
+    });
+  });
 
   api.get("/actions", (_req, res) => {
     res.json({

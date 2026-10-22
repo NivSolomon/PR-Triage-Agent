@@ -432,6 +432,19 @@ export const INDEX_HTML = `<!doctype html>
   </div>
 
   <div class="col">
+    <section class="panel hidden" id="digestPanel">
+      <div class="sec-head">
+        <h2 data-icon="clock">Scheduled digest</h2>
+        <span class="chip" id="digestChip"></span>
+        <span class="spacer"></span>
+        <button class="small" id="digestToggle">Show last message</button>
+      </div>
+      <div class="sec-body">
+        <div class="muted" id="digestMeta"></div>
+        <pre class="hidden" id="digestText" style="margin-top:10px;max-height:260px;overflow:auto"></pre>
+        <div id="digestRuns" style="margin-top:10px"></div>
+      </div>
+    </section>
     <section class="panel">
       <div class="sec-head">
         <h2 data-icon="shield">Approvals</h2>
@@ -920,6 +933,88 @@ export const APP_JS = `
       if (b.level !== "normal") box.appendChild(el("span", "chip " + tone, b.level + " mode"));
     }).catch(function () {});
   }
+
+  /* ---------- scheduled digest: read-only proof that the schedule ran ---------- */
+  var digestRuns = [];
+  /* "Friday 23 Oct, 08:30" in the schedule's own time zone, 24-hour clock, built from parts so the shape never varies by browser. */
+  function when(iso, tz) {
+    var d = new Date(iso);
+    try {
+      var o = { weekday: "long", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", hourCycle: "h23" };
+      if (tz) o.timeZone = tz;
+      var p = {};
+      new Intl.DateTimeFormat("en-GB", o).formatToParts(d).forEach(function (x) { p[x.type] = x.value; });
+      return p.weekday + " " + p.day + " " + p.month + ", " + p.hour + ":" + p.minute;
+    } catch (e) { return d.toLocaleString(); }
+  }
+  /* "in 15 hours" / "9 hours ago" / "in 1 day": whole words, no abbreviations. */
+  function rel(iso) {
+    var s = Math.round((new Date(iso).getTime() - Date.now()) / 1000);
+    var abs = Math.abs(s), n, unit;
+    if (abs < 60) return "just now";
+    if (abs < 3600) { n = Math.round(abs / 60); unit = "minute"; }
+    else if (abs < 172800) { n = Math.round(abs / 3600); unit = "hour"; }
+    else { n = Math.round(abs / 86400); unit = "day"; }
+    var t = n + " " + unit + (n === 1 ? "" : "s");
+    return s > 0 ? "in " + t : t + " ago";
+  }
+  function renderDigest(d) {
+    var panel = $("digestPanel");
+    if (!d || !d.enabled) { panel.classList.add("hidden"); return; }
+    panel.classList.remove("hidden");
+    digestRuns = d.runs || [];
+    var last = digestRuns[0];
+    var chip = $("digestChip");
+    chip.className = "chip " + (last ? (last.ok ? "ok" : "bad") : "");
+    chip.textContent = last ? (last.ok ? "Last run worked" : "Last run failed") : "No run yet";
+
+    var meta = $("digestMeta"); clear(meta);
+    var line = function (label, value, bad, hint) {
+      var row = el("div", "");
+      if (bad) row.style.color = "var(--bad)";
+      if (hint) row.title = hint;
+      row.appendChild(el("strong", "", label + ": "));
+      row.appendChild(document.createTextNode(value));
+      meta.appendChild(row);
+    };
+    /* Hover shows the raw cron expression, for anyone who wants the exact setting. */
+    line("Runs", (d.schedule || d.cron) + ", " + d.timezone + " time", false, "Setting (DIGEST_CRON): " + d.cron);
+    line("Next run", d.nextRun ? when(d.nextRun, d.timezone) + " (" + rel(d.nextRun) + ")" : "not scheduled");
+    line("Sent to", d.target);
+    if (last) {
+      line("Last run", when(last.startedAt, d.timezone) + " (" + rel(last.startedAt) + ")");
+      if (!last.ok) line("What went wrong", last.error || "unknown", true);
+    } else {
+      line("Last run", "none yet. Each run is recorded here after it happens.");
+    }
+
+    var pre = $("digestText");
+    pre.textContent = last && last.text ? last.text : "Nothing was sent.";
+    var btn = $("digestToggle");
+    btn.classList.toggle("hidden", !last);
+    if (!last) pre.classList.add("hidden");
+
+    var list = $("digestRuns"); clear(list);
+    if (digestRuns.length > 1) {
+      list.appendChild(el("div", "muted", "Earlier runs (newest first)"));
+      digestRuns.slice(1, 6).forEach(function (r) {
+        var row = el("div", "", "");
+        row.style.cssText = "display:flex;gap:8px;align-items:center;margin-top:4px";
+        row.appendChild(el("span", "chip " + (r.ok ? "ok" : "bad"), r.ok ? "OK" : "Failed"));
+        row.appendChild(el("span", "muted", when(r.startedAt, d.timezone) + (r.ok ? "" : " - " + (r.error || ""))));
+        list.appendChild(row);
+      });
+    }
+  }
+  function loadDigest() {
+    api("/api/digest").then(renderDigest).catch(function () {});
+  }
+  $("digestToggle").onclick = function () {
+    var pre = $("digestText");
+    var hide = !pre.classList.contains("hidden");
+    pre.classList.toggle("hidden", hide);
+    $("digestToggle").textContent = hide ? "Show last message" : "Hide last message";
+  };
 
   /* ---------- queue: filters, sorting, expandable cards ---------- */
   var SORTS = [
@@ -1483,6 +1578,7 @@ export const APP_JS = `
   setInterval(function () {
     if (!signedIn || document.hidden) return;
     updateQueueMeta();
+    loadDigest(); /* local database only, no GitHub call */
     if (!busy && !document.querySelector("#actions button.confirm") && !document.querySelector("#actions textarea")) loadActions();
   }, 30000);
 
@@ -1491,6 +1587,7 @@ export const APP_JS = `
     /* Logout asks the server to end the session, so a copied cookie stops working too. */
     if (endSession) { try { fetch("/api/logout", { method: "POST", credentials: "same-origin", headers: { "X-Requested-With": "pr-triage" } }); } catch (e) {} }
     signedIn = false; $("key").value = ""; queueData = null; f = newFilters(); open = {}; $("search").value = ""; actionList = []; actTab = null; actOpen = {}; actDraft = {}; actShowAll = false;
+    $("digestPanel").classList.add("hidden"); digestRuns = [];
     try { sessionStorage.removeItem("filters"); } catch (e) {}
     document.title = "PR Triage Agent";
     $("main").classList.add("hidden"); $("userbar").classList.add("hidden"); $("login").classList.remove("hidden");
@@ -1511,7 +1608,7 @@ export const APP_JS = `
       var who = $("who");
       who.textContent = (role === "approver" ? "Approver" : "Reader (cannot approve)") + (me.name && me.name.indexOf("shared") !== 0 ? " - " + me.name : "");
       who.className = "chip " + (role === "approver" ? "ok" : "");
-      loadQueue(); loadActions(); loadBudget(); loadGuide();
+      loadQueue(); loadActions(); loadBudget(); loadGuide(); loadDigest();
     });
   }
 
