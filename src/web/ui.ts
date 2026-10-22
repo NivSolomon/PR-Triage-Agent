@@ -471,7 +471,7 @@ export const INDEX_HTML = `<!doctype html>
       <textarea id="text" rows="2" placeholder="What should we review first?"></textarea>
       <button class="primary" id="send">Send</button>
     </div>
-    <div class="muted" id="chatMsg" style="margin-top:6px">Enter to send, Shift+Enter for a new line, Esc to close.</div>
+    <div class="muted" style="margin-top:6px">Enter to send, Shift+Enter for a new line, Esc to close.</div>
   </div>
 </aside>
 <div class="modal-back hidden" id="guideModal">
