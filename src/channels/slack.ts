@@ -330,12 +330,15 @@ export interface SlackDeps {
   /** Slack member ids allowed to chat. Approvers are always allowed too. */
   allowedIds: string[];
   /**
-   * Let every member of the workspace chat, instead of only `allowedIds`. This widens who may ASK
-   * (and so who may use the AI budget) and nothing else: approving is still `approverIds` only.
+   * Let every member of this workspace chat *and* approve, instead of only the named lists.
+   * Slack Connect (another workspace) is still refused. `approverIds` still get budget alerts
+   * and a DM of every card; the team channel also gets the card so testers can click it.
    */
   allowAllMembers?: boolean;
-  /** Slack member ids allowed to approve or reject. */
+  /** Slack member ids allowed to approve or reject (and always allowed to chat). */
   approverIds: string[];
+  /** Team channel (digest, and approval cards when `allowAllMembers`). */
+  teamChannelId?: string;
   /** Slack member id -> GitHub login, for the personal queue. Optional. */
   githubUsers?: Record<string, string>;
   agent: Agent;
@@ -366,8 +369,17 @@ export class SlackChannel {
     this.allowed = new Set([...d.allowedIds, ...d.approverIds]);
   }
 
-  isApprover(actorId: string): boolean {
-    return this.approvers.has(actorId.replace(/^slack:/, ""));
+  /**
+   * May this Slack person approve? Named approvers always; when `allowAllMembers`, anyone in
+   * this workspace. `teamId` is the person's home workspace (Slack Connect is refused).
+   */
+  isApprover(actorId: string, teamId?: string): boolean {
+    const userId = actorId.startsWith("slack:") ? actorId.slice("slack:".length) : "";
+    if (userId && this.approvers.has(userId)) return true;
+    if (this.d.allowAllMembers !== true) return false;
+    if (!userId) return false;
+    if (this.homeTeam && teamId && teamId !== this.homeTeam) return false;
+    return true;
   }
 
   /** The GitHub login linked to this Slack member, if the owner configured one. */
@@ -382,7 +394,7 @@ export class SlackChannel {
   private readonly UNLINKED_TIP =
     "Tip: your Slack account is not linked to a GitHub login, so this list is not personal. Ask the admin to add <your member id>:<your GitHub login> to SLACK_GITHUB_USERS.";
 
-  /** May this person talk to the agent? Never implies approval rights (see `isApprover`). */
+  /** May this person talk to the agent? When `allowAllMembers`, the same people may also approve. */
   private canChat(userId: string, teamId?: string): boolean {
     if (this.allowed.has(userId)) return true;
     if (this.d.allowAllMembers !== true) return false;
@@ -415,13 +427,19 @@ export class SlackChannel {
   }
 
   /**
-   * Show an approval card (with buttons) to every approver. Returns how many received it.
-   * The card text is rendered from the stored record, so approvers see exactly what would be posted.
+   * Show an approval card (with buttons). Named approvers always get a DM. When the workspace
+   * invite is the gate, the person who asked and the team channel get it too, so testers can click
+   * Approve without being listed. Returns how many deliveries succeeded.
    */
   async sendApprovalCards(record: ActionRecord): Promise<number> {
     const api = this.requireApi();
+    const targets = new Set<string>(this.approvers);
+    if (this.d.allowAllMembers === true) {
+      if (this.d.teamChannelId) targets.add(this.d.teamChannelId);
+      if (record.requestedBy?.startsWith("slack:")) targets.add(record.requestedBy.slice("slack:".length));
+    }
     let delivered = 0;
-    for (const id of this.approvers) {
+    for (const id of targets) {
       try {
         await api.post(id, `Approval needed (#${record.id.slice(0, 8)}): comment on pull request #${record.prNumber}`, {
           blocks: approvalBlocks(record),
@@ -452,7 +470,7 @@ export class SlackChannel {
     // "/triage queue" is a command; "/triage queue what is blocking #3?" is a question.
     const isCommand = rest.length === 0;
 
-    if (isCommand && (word === "" || word === "help")) return say(helpText(this.approvers.has(p.userId)));
+    if (isCommand && (word === "" || word === "help")) return say(helpText(this.isApprover(slackActor(p.userId), p.teamId)));
     if (isCommand && word === "queue") return this.guarded(p.userId, say, async () => {
       try {
         const login = this.githubLogin(p.userId);
@@ -499,7 +517,7 @@ export class SlackChannel {
     if (!this.canChat(p.userId, p.teamId)) return post(this.deny(p.userId));
 
     const text = this.stripMention(p.text);
-    if (text === "" || /^help$/i.test(text)) return post(helpText(this.approvers.has(p.userId)));
+    if (text === "" || /^help$/i.test(text)) return post(helpText(this.isApprover(slackActor(p.userId), p.teamId)));
 
     // A visible "working" note, replaced by the answer. Failing to show it must never block the answer.
     let placeholder: string | undefined;
@@ -533,13 +551,15 @@ export class SlackChannel {
    */
   async handleEditClick(p: {
     userId: string;
+    /** The person's home workspace; used to refuse Slack Connect when `allowAllMembers`. */
+    teamId?: string;
     id: string;
     channel?: string;
     ts?: string;
     open: (view: ModalView) => Promise<void>;
     notice: (text: string) => Promise<void>;
   }): Promise<void> {
-    if (!this.isApprover(slackActor(p.userId))) return p.notice("Only approvers can do that.");
+    if (!this.isApprover(slackActor(p.userId), p.teamId)) return p.notice("Only approvers can do that.");
     const record = this.d.approvals.get(p.id);
     if (!record) return p.notice("I cannot find that request any more.");
     if (record.status !== "pending") return p.notice(renderOutcome(record));
@@ -552,6 +572,8 @@ export class SlackChannel {
    */
   async handleDecision(p: {
     userId: string;
+    /** The person's home workspace; used to refuse Slack Connect when `allowAllMembers`. */
+    teamId?: string;
     kind: DecisionKind;
     id: string;
     /** Approve only: the approver corrected the text in the pop-up. */
@@ -561,7 +583,7 @@ export class SlackChannel {
   }): Promise<void> {
     const actor = slackActor(p.userId);
     // The ONLY check that matters is inside ApprovalService; this is just a friendlier early answer.
-    if (!this.isApprover(actor)) return p.notice("Only approvers can do that.");
+    if (!this.isApprover(actor, p.teamId)) return p.notice("Only approvers can do that.");
 
     const result = await decide(this.d.approvals, p.kind, p.id, actor, p.editedBody);
     try {
@@ -747,7 +769,7 @@ export class SlackChannel {
     const onClick = (kind: DecisionKind) =>
       async ({ ack, body, action, respond }: {
         ack: () => Promise<void>;
-        body: { user: { id: string }; message?: { blocks?: unknown[] } };
+        body: { user: { id: string; team_id?: string }; team?: { id?: string }; message?: { blocks?: unknown[] } };
         action: { value?: string };
         respond: (m: { replace_original: boolean; text: string; blocks: KnownBlock[] }) => Promise<unknown>;
       }): Promise<void> => {
@@ -758,6 +780,7 @@ export class SlackChannel {
         const card = (body.message?.blocks ?? []) as KnownBlock[];
         await this.handleDecision({
           userId: body.user.id,
+          teamId: body.user.team_id ?? body.team?.id,
           kind,
           id,
           finish: async (outcome) => {
@@ -774,13 +797,14 @@ export class SlackChannel {
     app.action(EDIT_ACTION, (async ({ ack, body, action, client }: {
       ack: () => Promise<void>;
       client: WebClient;
-      body: { user: { id: string }; trigger_id: string; channel?: { id: string }; container?: { channel_id?: string; message_ts?: string }; message?: { ts?: string } };
+      body: { user: { id: string; team_id?: string }; team?: { id?: string }; trigger_id: string; channel?: { id: string }; container?: { channel_id?: string; message_ts?: string }; message?: { ts?: string } };
       action: { value?: string };
     }): Promise<void> => {
       await ack();
       if (!action.value) return;
       void this.handleEditClick({
         userId: body.user.id,
+        teamId: body.user.team_id ?? body.team?.id,
         id: action.value,
         channel: body.container?.channel_id ?? body.channel?.id,
         ts: body.container?.message_ts ?? body.message?.ts,
@@ -813,6 +837,7 @@ export class SlackChannel {
       if (!meta.id) return;
       void this.handleDecision({
         userId: body.user.id,
+        teamId: (body.user as { team_id?: string }).team_id ?? (body as { team?: { id?: string } }).team?.id,
         kind: "approve",
         id: meta.id,
         editedBody: text,

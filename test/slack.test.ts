@@ -44,7 +44,7 @@ interface Post {
 }
 
 function setup(
-  over: { githubUsers?: Record<string, string>; allowed?: string[]; approvers?: string[]; allowAll?: boolean; teamId?: string; ask?: () => Promise<unknown>; approvals?: object } = {},
+  over: { githubUsers?: Record<string, string>; allowed?: string[]; approvers?: string[]; allowAll?: boolean; teamId?: string; teamChannelId?: string; ask?: () => Promise<unknown>; approvals?: object } = {},
 ) {
   const posts: Post[] = [];
   const removed: Array<[string, string]> = [];
@@ -82,6 +82,7 @@ function setup(
     allowedIds: over.allowed ?? ["U0ALICE"],
     allowAllMembers: over.allowAll,
     teamId: over.teamId,
+    teamChannelId: over.teamChannelId,
     approverIds: over.approvers ?? ["U0BOSS"],
     githubUsers: over.githubUsers,
     agent: agent as never,
@@ -284,13 +285,65 @@ describe("direct messages and mentions", () => {
       expect(replies.join()).not.toMatch(/not on the access list/);
     });
 
-    it("lets them ask for a comment but never makes them an approver", async () => {
+    it("lets them ask for a comment and approve it in Slack, recorded as themselves", async () => {
       const s = setup({ allowAll: true });
-      expect(s.channel.isApprover("slack:U0TESTER")).toBe(false);
+      expect(s.channel.isApprover("slack:U0TESTER")).toBe(true);
       expect(s.channel.isApprover("slack:U0BOSS")).toBe(true);
-      // The asker is passed on as an ordinary Slack actor; approving is decided by the approval service, not by chat access.
+      expect(s.channel.isApprover("web:U0TESTER")).toBe(false);
       await s.channel.handleMessage({ userId: "U0TESTER", channel: "D0X", text: "leave a comment on #7" });
       expect(s.agent.ask).toHaveBeenCalledWith(expect.objectContaining({ actor: "slack:U0TESTER" }));
+
+      const approvals = { approve: vi.fn(async () => record({ status: "executed" })), reject: vi.fn(), listPending: vi.fn(() => []) };
+      const decided = setup({ allowAll: true, teamId: "T0HOME", approvals });
+      const notices: string[] = [];
+      await decided.channel.handleDecision({
+        userId: "U0TESTER",
+        teamId: "T0HOME",
+        kind: "approve",
+        id: record().id,
+        finish: async () => undefined,
+        notice: async (t) => void notices.push(t),
+      });
+      expect(approvals.approve).toHaveBeenCalledWith(record().id, "slack:U0TESTER");
+      expect(notices).toHaveLength(0);
+    });
+
+    it("a Slack Connect click still cannot approve, even if they can see a card in a shared channel", async () => {
+      const approvals = { approve: vi.fn(), reject: vi.fn(), listPending: vi.fn(() => []) };
+      const s = setup({ allowAll: true, teamId: "T0HOME", approvals });
+      const notices: string[] = [];
+      await s.channel.handleDecision({
+        userId: "U0OUTSIDER",
+        teamId: "T0OTHER",
+        kind: "approve",
+        id: record().id,
+        finish: async () => undefined,
+        notice: async (t) => void notices.push(t),
+      });
+      expect(approvals.approve).not.toHaveBeenCalled();
+      expect(notices.join()).toMatch(/Only approvers/);
+    });
+
+    it("help and the Home tab tell a workspace tester they can approve", async () => {
+      const s = setup({ allowAll: true });
+      const replies: string[] = [];
+      await s.channel.handleCommand({ userId: "U0TESTER", text: "help", reply: async (t) => void replies.push(t) });
+      expect(replies.join()).toMatch(/You are an APPROVER/);
+      await s.channel.handleHomeOpened("U0TESTER");
+      expect(JSON.stringify(s.homes[0]?.blocks)).toContain("You are an APPROVER");
+    });
+
+    it("posts the approval card to the named approvers, the asker, and the team channel", async () => {
+      const proposed = record({ requestedBy: "slack:U0TESTER" });
+      const s = setup({
+        allowAll: true,
+        teamChannelId: "C0TEAM",
+        approvers: ["U0BOSS"],
+        ask: async () => ({ text: "I drafted a comment.", proposed: [proposed] }),
+      });
+      await s.channel.handleMessage({ userId: "U0TESTER", channel: "D0X", text: "leave a comment on #7" });
+      const cards = s.posts.filter((p) => p.opts?.blocks);
+      expect(cards.map((c) => c.channel).sort()).toEqual(["C0TEAM", "U0BOSS", "U0TESTER"]);
     });
 
     it("refuses people Slack says belong to another workspace (Slack Connect), but not our own", async () => {
@@ -492,6 +545,13 @@ describe("identity", () => {
     expect(channel.isApprover("slack:U0BOSS")).toBe(true);
     expect(channel.isApprover("slack:U0ALICE")).toBe(false);
     expect(channel.isApprover("web:U0BOSS")).toBe(false);
+  });
+
+  it("when every workspace member may approve, a web identity still cannot", () => {
+    const { channel } = setup({ allowAll: true, approvers: ["U0BOSS"] });
+    expect(channel.isApprover("slack:U0ALICE")).toBe(true);
+    expect(channel.isApprover("web:U0BOSS")).toBe(false);
+    expect(channel.isApprover("mcp:proposer:x")).toBe(false);
   });
 });
 

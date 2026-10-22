@@ -35,7 +35,13 @@ export function makeIsApprover(config: Config): (actorId: string) => boolean {
   if (config.WEB_APPROVER_KEY) allowed.add(WEB_APPROVER_ACTOR);
   // Each named web user with the approver role is their own approver identity.
   for (const u of config.WEB_USERS) if (u.role === "approver") allowed.add(`web:${u.name}`);
-  return (actorId) => allowed.has(actorId);
+  const slackAll = config.SLACK_ALLOW_ALL_MEMBERS;
+  return (actorId) => {
+    if (allowed.has(actorId)) return true;
+    // A workspace invite is then enough to Approve/Reject in Slack (testers). Slack Connect
+    // is refused in the Slack adapter (workspace id) before this is called. MCP and web readers never match.
+    return slackAll === true && /^slack:[UW][A-Z0-9]{2,}$/.test(actorId);
+  };
 }
 
 /** Wire every part together. Fails fast with a clear message if a required secret is missing. */
@@ -79,6 +85,7 @@ export function createApp(config: Config): App {
     allowedIds: config.SLACK_ALLOWED_USER_IDS,
     allowAllMembers: config.SLACK_ALLOW_ALL_MEMBERS,
     approverIds: config.SLACK_APPROVER_USER_IDS,
+    teamChannelId: config.SLACK_DIGEST_CHANNEL_ID,
     githubUsers: config.SLACK_GITHUB_USERS,
     agent,
     approvals,

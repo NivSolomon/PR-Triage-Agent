@@ -24,15 +24,16 @@ Design reasoning, trade-offs, cost estimate, evals and the answers to the unders
 
 ## How a tester uses it
 
-1. **Talk to it:** in Slack, open the **PR Triage Agent** app (Apps in the sidebar) and send `/triage help`, or message it directly. If the deployment is not set to `SLACK_ALLOW_ALL_MEMBERS=true` and you are not on the access list, it replies with your Slack member ID; the owner adds it to `SLACK_ALLOWED_USER_IDS`.
+1. **Talk to it:** join the Slack workspace (an invite is enough on this deployment). Open the **PR Triage Agent** app (Apps in the sidebar) and send `/triage help`, or message it directly. In a channel, invite the app (`/invite @PR Triage Agent`) and @mention it.
    Or open the deployment URL and sign in with the personal key you were given.
 2. **Ask:** message the app directly (its **Messages** tab): your questions and its answers stay in the conversation. In a channel, @mention it and it replies in a thread. For quick, private lookups that use no AI credit: `/triage queue`, `/triage digest`, `/triage budget`, `/triage pending` (slash-command replies are private to you and temporary; that is how Slack treats them).
-3. **Trigger the approved action:** ask "Leave a comment on #12 asking the author to fix CI". The agent only *proposes*. An approval card with the exact text appears for the approvers.
+3. **Trigger the approved action:** ask "Leave a comment on #12 asking the author to fix CI". The agent only *proposes*. An approval card with the exact text appears; nothing is posted to GitHub until a human approves it.
 4. **Who approves, and where:**
-   - **Slack approvers** (`SLACK_APPROVER_USER_IDS`) receive the card as a direct message from the app with **Approve and post** (asks "Post this comment?" first) and **Reject** buttons.
-   - **Web approvers**: a person in `WEB_USERS` with role `approver` signs in on the web page and uses the buttons under **Approvals**; the approval is recorded under their name (`web:dana`). This is how testers can approve without being a Slack approver. (The older shared `WEB_APPROVER_KEY` still works, but then the record only says "web:approver".)
+   - **This deployment (`SLACK_ALLOW_ALL_MEMBERS=true`):** anyone who joined **this** Slack workspace can **Approve and post**, **Edit text** and **Reject** on the card in Slack. The card is sent as a DM to the person who asked, to the named owners (`SLACK_APPROVER_USER_IDS`), and to the team channel (`SLACK_DIGEST_CHANNEL_ID`). `/triage pending` sends you the cards again. A workspace invite is the gate; a Slack Connect guest from another workspace is still refused.
+   - **When that flag is off:** only member IDs in `SLACK_APPROVER_USER_IDS` can approve in Slack. Everyone else on `SLACK_ALLOWED_USER_IDS` can still ask for a comment.
+   - **Web:** a person in `WEB_USERS` with role `approver` (or the shared `WEB_APPROVER_KEY`) signs in on the web page and uses the buttons under **Approvals**. A `reader` key can look and request, never approve.
    - Reader keys and MCP tokens can **never** approve.
-   - **Correcting the wording first:** an approver can change the comment before it is posted, on the web (**Edit text**, then **Approve and post edited text**) or in Slack (**Edit text** opens a pop-up whose button says **Post this comment**). Submitting the corrected text *is* the approval, so nothing is posted by pressing Edit, and the original draft stays on the card and in the history. Requesters and MCP clients can never edit.
+   - **Correcting the wording first:** **Edit text** on the Slack card (the pop-up's button says **Post this comment**) or on the web (**Approve and post edited text**). Submitting the corrected text *is* the approval. The original draft stays on the card and in the history.
 5. **MCP:** `POST https://<your-host>/mcp` with `Authorization: Bearer <token>` (Streamable HTTP, stateless). Tools: `get_review_queue`, `get_pull_request`, `ask_triage_agent`, and `propose_comment` for `proposer` tokens only.
 
 **What each person may and may not do** is written in the app itself, and it differs for approvers and everyone else: `/triage help` in Slack, and the **Guide** button in the web page's top bar, which opens it as a popup (it also opens once on a first visit). Both come from one source, `src/guide.ts`, so the two channels cannot say different things.
@@ -58,8 +59,8 @@ firewall changes, and it works the same on a laptop and on a server.
    Socket Mode, so nothing is configured by hand.
 2. **Install to Workspace.** Copy the **Bot User OAuth Token** (`xoxb-...`) into `SLACK_BOT_TOKEN`.
 3. **Basic Information -> App-Level Tokens -> Generate Token**, scope `connections:write`. Copy it (`xapp-...`) into `SLACK_APP_TOKEN`.
-4. Put your own member ID in `SLACK_APPROVER_USER_IDS` (Slack: your profile -> three dots -> **Copy member ID**), and teammates' IDs in `SLACK_ALLOWED_USER_IDS`.
-5. Optional: invite the app to a channel (`/invite @PR Triage Agent`) and put the channel ID in `SLACK_DIGEST_CHANNEL_ID` for the morning digest.
+4. Put your own member ID in `SLACK_APPROVER_USER_IDS` (Slack: your profile -> three dots -> **Copy member ID**). Those people always get a DM of every approval card and the budget alerts. For testers, set `SLACK_ALLOW_ALL_MEMBERS=true` instead of collecting every ID: a workspace invite then lets them chat **and** Approve/Reject in Slack.
+5. Invite the app to the channel testers will use (`/invite @PR Triage Agent`) and put that channel ID in `SLACK_DIGEST_CHANNEL_ID` (morning digest, and the approval cards testers click).
 
 Permissions requested (all in the manifest): `commands`, `chat:write`, `chat:write.public`, `app_mentions:read`,
 `im:history`, `im:write`. The app cannot read channel history, files or user profiles.
@@ -94,10 +95,10 @@ Secrets are **never committed**. Locally they live in `.env` (git-ignored); in p
 | `SLACK_BOT_TOKEN` | yes | Bot token, starts with `xoxb-` (OAuth & Permissions) |
 | `SLACK_APP_TOKEN` | yes | App-level token, starts with `xapp-`, scope `connections:write` (Socket Mode) |
 | `SLACK_ALLOWED_USER_IDS` | no | Comma-separated Slack member IDs (`U01ABCDEF`) allowed to chat. Empty means only approvers |
-| `SLACK_ALLOW_ALL_MEMBERS` | no | `true` lets every member of **this workspace** chat (for testers; people from other workspaces in a Slack Connect channel are still refused), `false` (default) uses only the list above. Never grants approval rights |
+| `SLACK_ALLOW_ALL_MEMBERS` | no | `true` lets every member of **this workspace** chat **and** Approve/Reject in Slack (for testers: a workspace invite is then enough). People from other workspaces in a Slack Connect channel are still refused. `false` (default) uses only the ID lists |
 | `SLACK_APPROVER_USER_IDS` | yes | Comma-separated member IDs allowed to approve (also allowed to chat) |
 | `SLACK_GITHUB_USERS` | no | `U01ABCDEF:octocat,...` links Slack members to GitHub logins, so `/triage queue` and questions like "what should I review?" are personal (review requests for you first, then your own PRs) |
-| `SLACK_DIGEST_CHANNEL_ID` | no | Channel ID (`C01ABCDEF`) for the digest; defaults to a DM to every approver |
+| `SLACK_DIGEST_CHANNEL_ID` | no | Channel ID (`C01ABCDEF`) for the weekday digest and, when `SLACK_ALLOW_ALL_MEMBERS=true`, the approval cards testers click. Defaults to a DM to every named approver |
 | `WEB_USERS` | for the web page (recommended) | JSON `{"dana":{"key":"<16+ chars>","role":"approver"},"lee":{"key":"<16+ chars>","role":"reader"}}`. One key per person; each key must be different |
 | `WEB_ACCESS_KEY`, `WEB_APPROVER_KEY` | no (older alternative) | 16+ chars each, different from each other. Shared by everyone who holds them. Read/chat, and approve, respectively |
 | `TRUST_PROXY` | no | Number of reverse proxies in front (`1` on Fly.io, set in `fly.toml`; default `0`). Without it the login lockout cannot tell visitors apart |

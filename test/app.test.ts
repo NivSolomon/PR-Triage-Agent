@@ -12,6 +12,21 @@ describe("makeIsApprover", () => {
     expect(isApprover("mcp:anything")).toBe(false);
     expect(isApprover("U01AAA")).toBe(false);
   });
+
+  it("when SLACK_ALLOW_ALL_MEMBERS, any Slack member may approve; MCP and web readers still cannot", () => {
+    const isApprover = makeIsApprover(
+      loadConfig({
+        SLACK_ALLOW_ALL_MEMBERS: "true",
+        SLACK_APPROVER_USER_IDS: "U01AAA",
+        WEB_USERS: JSON.stringify({ lee: { key: "reader-key-16chars", role: "reader" } }),
+      }),
+    );
+    expect(isApprover("slack:U09TESTER")).toBe(true);
+    expect(isApprover("slack:U01AAA")).toBe(true);
+    expect(isApprover("mcp:proposer:abc")).toBe(false);
+    expect(isApprover("web:lee")).toBe(false);
+    expect(isApprover("U09TESTER")).toBe(false);
+  });
 });
 
 describe("createApp", () => {

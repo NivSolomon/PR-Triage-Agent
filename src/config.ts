@@ -76,7 +76,7 @@ const schema = z.object({
   SLACK_APP_TOKEN: z.string().startsWith("xapp-", "must be an app-level token starting with xapp-").optional(),
   /** Slack member ids allowed to chat with the bot. Approvers are always allowed too. */
   SLACK_ALLOWED_USER_IDS: slackIds,
-  /** "true": every member of the Slack workspace may chat. Approving still needs SLACK_APPROVER_USER_IDS. */
+  /** "true": every member of this Slack workspace may chat and approve. Slack Connect is still refused. */
   SLACK_ALLOW_ALL_MEMBERS: z
     .enum(["true", "false"], { error: 'must be "true" or "false"' })
     .default("false")

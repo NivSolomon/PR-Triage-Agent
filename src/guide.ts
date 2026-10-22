@@ -28,8 +28,8 @@ export interface GuideOptions {
 export function buildGuide(audience: GuideAudience, opts: GuideOptions): Guide {
   const approver = audience === "approver";
   const where = opts.channel === "slack"
-    ? "Slack: the approval card the app sends you as a direct message, or the web page with the approver key"
-    : "the Approvals panel on this page (Slack approvers also get a card in their direct messages)";
+    ? "Slack: the approval card (a direct message from the app, the team channel if one is set, or /triage pending), or the web page"
+    : "the Approvals panel on this page (Slack also sends a card: a direct message, and the team channel if one is set)";
 
   const youAre = approver
     ? "You are an APPROVER. You can ask questions, request comments, and approve or reject requests."
