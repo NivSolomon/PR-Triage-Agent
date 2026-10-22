@@ -127,10 +127,11 @@ and usage history across restarts.
 
 ### CI/CD (GitHub Actions)
 
-- `.github/workflows/ci.yml` runs `npm run typecheck` and `npm test` on every pull request and every push to `main`.
-  (`npm run evals` calls the LLM, so it is run by hand.)
-- `.github/workflows/deploy.yml` runs `fly deploy` after CI succeeds on `main`, then polls `/healthz`. It can also be
-  started by hand from the Actions tab.
+- `.github/workflows/ci.yml` runs `npm run typecheck` and `npm test` on every pull request and on every push to `main`
+  except docs-only ones (`*.md`, `docs/`, `LICENSE`). (`npm run evals` calls the LLM, so it is run by hand.)
+- `.github/workflows/deploy.yml` runs `fly deploy` after CI succeeds on `main`, then polls `/healthz`. If the deploy or
+  the health check fails, it redeploys the image that was running before. It can also be started by hand from the
+  Actions tab. Because it is one machine with a volume, a deploy means a short restart.
 - One-time setup: `fly tokens create deploy`, then add the output as the repo secret `FLY_API_TOKEN`
   (GitHub → Settings → Secrets and variables → Actions). Runtime secrets stay in `fly secrets`.
 - Recommended: protect `main` (Settings → Branches) and require the `test` check to pass before merging.

@@ -33,6 +33,14 @@ jobs:
 
       - uses: superfly/flyctl-actions/setup-flyctl@master
 
+      # Remember the image that is running now, so a bad deploy can be rolled back to it.
+      - name: Record current image
+        id: prev
+        run: |
+          IMAGE=$(flyctl machine list --app "$FLY_APP" --json | jq -r '.[0].config.image // empty')
+          echo "Currently running: ${IMAGE:-<none>}"
+          echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
+
       - name: Deploy
         run: flyctl deploy --remote-only --app "$FLY_APP"
 
@@ -44,5 +52,18 @@ jobs:
             fi
             echo "Not healthy yet (attempt $i), retrying in 10s..."; sleep 10
           done
-          echo "Health check failed. Roll back with: fly releases, then fly deploy --image <previous image>"
+          echo "Health check failed."
           exit 1
+
+      # If the deploy or the health check failed, put the previous image back (only if the machine actually changed).
+      - name: Roll back to previous image
+        if: failure() && steps.prev.outputs.image != ''
+        run: |
+          CURRENT=$(flyctl machine list --app "$FLY_APP" --json | jq -r '.[0].config.image // empty')
+          if [ "$CURRENT" = "${{ steps.prev.outputs.image }}" ]; then
+            echo "Machine still runs the previous image; nothing to roll back."
+            exit 0
+          fi
+          echo "Rolling back $CURRENT -> ${{ steps.prev.outputs.image }}"
+          flyctl deploy --app "$FLY_APP" --image "${{ steps.prev.outputs.image }}"
+          echo "::error::Deploy failed and was rolled back to ${{ steps.prev.outputs.image }}"
