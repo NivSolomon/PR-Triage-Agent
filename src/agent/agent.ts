@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { BudgetService, renderBudgetAlert } from "../budget/service.js";
+import { renderBudgetAlert } from "../budget/service.js";
+import type { BudgetPort } from "../budget/service.js";
 import type { ActionRecord } from "../store/actions.js";
 import type { ChatMessage, LlmPort, ToolCall } from "./llm.js";
 import { checkGrounding, notFoundNumbers, numbersInToolOutput, stripNotFoundPrUrls } from "./grounding.js";
@@ -14,7 +15,7 @@ import type { ToolContext, ToolDeps } from "./tools.js";
 export interface AgentOptions {
   llm: LlmPort;
   tools: ToolDeps;
-  budget: BudgetService;
+  budget: BudgetPort;
   /** Told once when the budget crosses a threshold (economy / blocked). */
   notifyTeam?: (text: string) => void | Promise<void>;
   now?: () => Date;

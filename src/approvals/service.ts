@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { GitHubError, isAmbiguousFailure } from "../github/client.js";
-import type { GitHubClient } from "../github/client.js";
+import type { GitHubWriter } from "../github/port.js";
 import type { ActionRecord } from "../store/actions.js";
 import { ActionRepository } from "../store/actions.js";
 
@@ -25,10 +25,8 @@ const MAX_COMMENT_LENGTH = 2000;
 const MAX_PENDING = 20;
 const DEFAULT_TTL_MS = 24 * 60 * 60 * 1000;
 
-type GitHubPort = Pick<GitHubClient, "getPrSummary" | "postComment" | "findCommentWithMarker">;
-
 export interface ApprovalServiceOptions {
-  github: GitHubPort;
+  github: GitHubWriter;
   repo: ActionRepository;
   /** Identity check, e.g. "slack:U01ABC". The ONLY place approval rights are decided. */
   isApprover: (actorId: string) => boolean;

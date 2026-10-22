@@ -1,4 +1,4 @@
-import type { GitHubClient } from "../github/client.js";
+import type { GitHubReader } from "../github/port.js";
 import type { PrDetail } from "../github/types.js";
 import { assessPr, rankAssessments } from "./analyze.js";
 import type { TriageAssessment } from "./analyze.js";
@@ -13,8 +13,6 @@ export interface QueueResult {
   /** True when more open PRs exist than the limit we analysed. */
   truncated: boolean;
 }
-
-type GitHubReader = Pick<GitHubClient, "listOpenPrs" | "getPr" | "repo">;
 
 const CONCURRENCY = 4;
 

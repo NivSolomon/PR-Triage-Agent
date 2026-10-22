@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { GitHubPort } from "./port.js";
 import type {
   CheckSummary,
   CommentSummary,
@@ -178,7 +179,7 @@ export function isAmbiguousFailure(err: unknown): boolean {
 const FAILING = new Set(["failure", "timed_out", "cancelled", "action_required", "startup_failure"]);
 const PASSING = new Set(["success", "neutral", "skipped"]);
 
-export class GitHubClient {
+export class GitHubClient implements GitHubPort {
   private readonly fetchImpl: typeof fetch;
   private readonly baseUrl: string;
   private readonly sleep: (ms: number) => Promise<void>;

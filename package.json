@@ -12,6 +12,7 @@
     "start": "tsx --env-file-if-exists=.env src/index.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "test:e2e": "vitest run test/e2e.test.ts",
     "test:watch": "vitest",
     "evals": "vitest run --config vitest.evals.config.ts",
     "evals:once": "tsx --env-file-if-exists=.env evals/once.ts"

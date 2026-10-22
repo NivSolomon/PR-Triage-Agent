@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { BANDS, WEIGHTS, assessPr, rankAssessments } from "../src/triage/analyze.js";
 import type { TriageState } from "../src/triage/analyze.js";
 import { buildQueue } from "../src/triage/queue.js";
+import type { GitHubReader } from "../src/github/port.js";
 import type { PrDetail } from "../src/github/types.js";
 
 const NOW = new Date("2026-10-20T12:00:00Z");
@@ -372,6 +373,20 @@ describe("buildQueue", () => {
     const q = await buildQueue(github, { limit: 2, now: NOW });
     expect(q.items).toHaveLength(2);
     expect(q.truncated).toBe(true);
+  });
+
+  it("depends on GitHubReader, not GitHubClient: a stub with no HTTP client is enough", async () => {
+    const github: GitHubReader = {
+      repo: "acme/app",
+      listOpenPrs: async () => [],
+      getPr: async () => {
+        throw new Error("no PRs, so getPr must not be called");
+      },
+    };
+    const q = await buildQueue(github, { now: NOW });
+    expect(q.repo).toBe("acme/app");
+    expect(q.items).toEqual([]);
+    expect(q.failed).toEqual([]);
   });
 });
 

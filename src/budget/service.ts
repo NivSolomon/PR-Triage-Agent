@@ -60,7 +60,15 @@ export interface UsageInput {
 const monthKey = (d: Date) => d.toISOString().slice(0, 7);
 const dayKey = (d: Date) => d.toISOString().slice(0, 10);
 
-export class BudgetService {
+/** What the agent needs from the budget guard. The SQLite details stay in BudgetService. */
+export interface BudgetPort {
+  gate(actor: string): Gate;
+  record(u: UsageInput): number;
+  summary(): BudgetSummary;
+  claimAlert(level: BudgetLevel): boolean;
+}
+
+export class BudgetService implements BudgetPort {
   private readonly now: () => Date;
 
   constructor(private readonly o: BudgetOptions) {

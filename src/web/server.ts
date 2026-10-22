@@ -6,12 +6,12 @@ import { z } from "zod";
 import { renderApprovalCard } from "../approvals/render.js";
 import type { ApprovalService } from "../approvals/service.js";
 import type { Agent } from "../agent/agent.js";
-import type { BudgetService } from "../budget/service.js";
+import type { BudgetPort } from "../budget/service.js";
 import { decide, renderQueue } from "../channels/shared.js";
 import { personalView } from "../triage/personal.js";
 import { buildGuide } from "../guide.js";
 import type { DecisionResult } from "../channels/shared.js";
-import type { GitHubClient } from "../github/client.js";
+import type { GitHubReader } from "../github/port.js";
 import { DIGEST_TASK } from "../scheduler/digest.js";
 import { describeCron } from "../scheduler/describe.js";
 import type { ActionRecord } from "../store/actions.js";
@@ -73,8 +73,8 @@ export interface WebDeps {
   sessionDb?: DatabaseSync;
   agent: Agent;
   approvals: ApprovalService;
-  github: Pick<GitHubClient, "listOpenPrs" | "getPr" | "repo">;
-  budget: BudgetService;
+  github: GitHubReader;
+  budget: Pick<BudgetPort, "summary">;
   /** A request created from the web page: lets Slack approvers get the card too. */
   onProposed?: (record: ActionRecord, replaced?: ActionRecord[]) => Promise<void> | void;
   /** A decision taken on the web page: lets the requester be told. */

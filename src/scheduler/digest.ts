@@ -1,5 +1,5 @@
 import cron from "node-cron";
-import type { GitHubClient } from "../github/client.js";
+import type { GitHubReader } from "../github/port.js";
 import type { RunRepository } from "../store/runs.js";
 import type { TriageAssessment } from "../triage/analyze.js";
 import { buildQueue } from "../triage/queue.js";
@@ -62,7 +62,7 @@ export function renderDigest(q: QueueResult): string {
 export const DIGEST_TASK = "digest";
 
 export interface DigestDeps {
-  github: Pick<GitHubClient, "listOpenPrs" | "getPr" | "repo">;
+  github: GitHubReader;
   /** Deliver text to the team. */
   send: (text: string) => Promise<void>;
   /** Where each run is recorded, so the web page can show whether the schedule fired and worked. Optional. */

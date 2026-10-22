@@ -5,8 +5,8 @@ import { containsAtMention, renderApprovalCard, renderOutcome } from "../approva
 import { buildGuide, renderGuideText } from "../guide.js";
 import type { ApprovalService } from "../approvals/service.js";
 import type { Agent } from "../agent/agent.js";
-import type { BudgetService } from "../budget/service.js";
-import type { GitHubClient } from "../github/client.js";
+import type { BudgetPort } from "../budget/service.js";
+import type { GitHubReader } from "../github/port.js";
 import type { ActionRecord } from "../store/actions.js";
 import { renderDigest } from "../scheduler/digest.js";
 import { homeBlocks, homeDeniedBlocks } from "./slackHome.js";
@@ -399,8 +399,8 @@ export interface SlackDeps {
   githubUsers?: Record<string, string>;
   agent: Agent;
   approvals: ApprovalService;
-  github: Pick<GitHubClient, "listOpenPrs" | "getPr" | "repo">;
-  budget: BudgetService;
+  github: GitHubReader;
+  budget: Pick<BudgetPort, "summary">;
   /** Tests inject a fake. In production this is created from the Bolt client on start. */
   api?: SlackApi;
   /** Our workspace id (T...). Normally learned from Slack on start; tests set it. */
