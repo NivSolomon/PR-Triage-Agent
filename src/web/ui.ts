@@ -6,6 +6,8 @@
  * Catalog JSON is interpolated once at load time (not by the browser script).
  */
 import { EN } from "../i18n/catalog.js";
+import { webPromptGroups } from "../prompts/bank.js";
+import { LIST_PREVIEW, LIST_STEP } from "../text/fold-list.js";
 
 export const INDEX_HTML = `<!doctype html>
 <html lang="en">
@@ -281,20 +283,26 @@ export const INDEX_HTML = `<!doctype html>
   .rich li { margin: 6px 0; padding-left: 2px; }
   .rich li::marker { color: var(--accent); }
   .rich ul ul { margin: 6px 0 4px; padding-left: 0; list-style: none; display: grid; gap: 5px; }
-  .rich ul ul li { margin: 0; display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; font-size: 13.5px; }
-  .rich ul ul li.kv { display: grid; grid-template-columns: 132px minmax(0, 1fr); gap: 8px; align-items: baseline; }
+  .rich ul ul li { margin: 0; display: flex; gap: 12px; align-items: baseline; flex-wrap: wrap; font-size: 13.5px; }
+  .rich ul ul li.kv { display: grid; grid-template-columns: max-content minmax(0, 1fr); column-gap: 16px; row-gap: 2px; align-items: baseline; }
   .rich ul ul li.kv > .chip { justify-self: start; }
-  .rich .k { color: var(--muted); font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+  .rich .k { color: var(--muted); font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; white-space: nowrap; padding-inline-end: 2px; }
   .rich strong { font-weight: 650; }
   .rich code { font: 12.5px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; padding: 1px 6px; border-radius: 6px; background: var(--neutral-bg); }
   .rich .prref { font-weight: 650; color: var(--accent); }
   .rich a.lnk { display: inline-flex; align-items: center; gap: 5px; padding: 1px 9px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); font-size: 12.5px; font-weight: 600; vertical-align: baseline; }
   .rich a.lnk:hover { text-decoration: none; filter: brightness(1.15); }
   .rich a.lnk .ic { width: 12px; height: 12px; }
+  .rich button.more-prs { margin: -2px 0 10px 20px; padding: 5px 12px; font-size: 12.5px; border-radius: 999px; background: var(--accent-soft); border-color: transparent; color: var(--accent); }
+  .rich button.more-prs:hover:not(:disabled) { filter: brightness(1.12); }
   .typing::after { content: ""; display: inline-block; width: 1.4em; text-align: left; animation: dots 1.2s steps(4) infinite; }
   @keyframes dots { 0% { content: ""; } 25% { content: "."; } 50% { content: ".."; } 75%, 100% { content: "..."; } }
   .suggest { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
   .suggest button { font-size: 12px; padding: 4px 10px; border-radius: 999px; background: var(--accent-soft); border-color: transparent; color: var(--accent); }
+  .prompt-bank { max-height: 220px; overflow: auto; margin-bottom: 10px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--soft); }
+  .prompt-bank h4 { margin: 8px 0 4px; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+  .prompt-bank h4:first-child { margin-top: 0; }
+  .prompt-bank button { display: block; width: 100%; text-align: start; font-size: 12.5px; padding: 5px 8px; margin: 2px 0; border-color: transparent; background: var(--panel); }
   .composer { display: flex; gap: 8px; align-items: flex-end; margin-top: 10px; }
   .composer textarea { flex: 1; }
   .composer-meta { display: flex; justify-content: space-between; gap: 12px; margin-top: 6px; }
@@ -486,6 +494,8 @@ export const INDEX_HTML = `<!doctype html>
   </div>
   <div class="drawer-foot">
     <div class="suggest" id="suggest"></div>
+    <button type="button" class="ghost small" id="morePrompts">More prompts</button>
+    <div id="promptBank" class="prompt-bank hidden"></div>
     <div class="composer">
       <textarea id="text" rows="2" maxlength="2000" placeholder="What should we review first?" data-i18n-placeholder="chat.placeholder"></textarea>
       <button class="primary" id="send">Send</button>
@@ -511,6 +521,9 @@ export const INDEX_HTML = `<!doctype html>
 export const APP_JS = `
 (function () {
   var I18N = ${JSON.stringify(EN)};
+  var PROMPT_GROUPS = ${JSON.stringify(webPromptGroups())};
+  var LIST_PREVIEW = ${LIST_PREVIEW};
+  var LIST_STEP = ${LIST_STEP};
   function t(key, vars) {
     var s = I18N[key] || key;
     if (!vars) return s;
@@ -839,7 +852,8 @@ export const APP_JS = `
     };
     lines.forEach(function (raw) {
       var line = raw.split(String.fromCharCode(13)).join("");
-      if (line.trim() === "") { flushPara(); endList(); return; }
+      /* A blank line inside a ranked list must not start a new <ol> (every item would show as 1.). */
+      if (line.trim() === "") { if (list) return; flushPara(); return; }
       var indent = 0;
       while (indent < line.length && line.charAt(indent) === " ") indent++;
       var rest = line.slice(indent);
@@ -851,11 +865,14 @@ export const APP_JS = `
       if (isBullet || isNumbered) {
         flushPara();
         var body = isBullet ? rest.slice(2) : rest.slice(d + 2);
-        if (indent >= 2 && lastLi) {
+        /* Nest details under the last ranked item even when the model did not indent the dashes. */
+        if (isBullet && lastLi && (indent >= 2 || ordered)) {
           if (!sub) { sub = el("ul"); lastLi.appendChild(sub); }
           var sli = el("li"); detailRow(sli, body.trim()); sub.appendChild(sli);
         } else {
-          if (!list || ordered !== isNumbered) { ordered = isNumbered; list = el(ordered ? "ol" : "ul"); box.appendChild(list); }
+          if (isNumbered) {
+            if (!list || !ordered) { ordered = true; list = el("ol"); box.appendChild(list); }
+          } else if (!list || ordered) { ordered = false; list = el("ul"); box.appendChild(list); }
           var li = el("li"); inline(li, body.trim()); list.appendChild(li); lastLi = li; sub = null;
         }
         return;
@@ -864,6 +881,43 @@ export const APP_JS = `
       para.push(line.trim());
     });
     flushPara();
+    foldLists(box);
+  }
+
+  /* Long ranked lists: show 3, then a button that reveals the rest in chunks. */
+  function foldLists(box) {
+    var ols = box.querySelectorAll("ol");
+    var i;
+    for (i = 0; i < ols.length; i++) foldOl(ols[i]);
+  }
+  function foldOl(ol) {
+    var items = [];
+    var i;
+    for (i = 0; i < ol.children.length; i++) {
+      if (ol.children[i].tagName === "LI") items.push(ol.children[i]);
+    }
+    if (items.length <= LIST_PREVIEW) return;
+    var shown = LIST_PREVIEW;
+    var btn = el("button", "more-prs");
+    btn.type = "button";
+    var paint = function () {
+      var j, left, n;
+      for (j = 0; j < items.length; j++) items[j].style.display = j < shown ? "" : "none";
+      left = items.length - shown;
+      if (left <= 0) {
+        if (btn.parentNode) btn.parentNode.removeChild(btn);
+        return;
+      }
+      n = Math.min(LIST_STEP, left);
+      btn.textContent = "Show " + n + " more (" + left + " hidden)";
+      btn.setAttribute("aria-label", btn.textContent);
+    };
+    btn.onclick = function () {
+      shown = Math.min(items.length, shown + LIST_STEP);
+      paint();
+    };
+    ol.parentNode.insertBefore(btn, ol.nextSibling);
+    paint();
   }
 
   /* Finish a bot message: formatted text, then a small footer with the time and a copy button. */
@@ -884,12 +938,27 @@ export const APP_JS = `
     col.parentNode.scrollIntoView({ block: "start", behavior: "smooth" });
   }
 
+  function usePrompt(s) { $("text").value = s; send(); }
+
   function renderSuggestions() {
     var box = $("suggest"); clear(box);
     SUGGESTIONS.forEach(function (s) {
       var b = el("button", "", s);
-      b.onclick = function () { $("text").value = s; send(); };
+      b.onclick = function () { usePrompt(s); };
       box.appendChild(b);
+    });
+  }
+
+  function renderPromptBank() {
+    var box = $("promptBank"); if (!box) return; clear(box);
+    PROMPT_GROUPS.forEach(function (g) {
+      box.appendChild(el("h4", "", g.title));
+      g.items.forEach(function (s) {
+        var b = el("button", "", s);
+        b.type = "button";
+        b.onclick = function () { usePrompt(s); };
+        box.appendChild(b);
+      });
     });
   }
 
@@ -1701,6 +1770,11 @@ export const APP_JS = `
   $("closeChat").onclick = closeChat;
   $("backdrop").onclick = closeChat;
   $("newChat").onclick = newChat;
+  renderPromptBank();
+  $("morePrompts").onclick = function () {
+    $("promptBank").classList.toggle("hidden");
+    $("morePrompts").textContent = $("promptBank").classList.contains("hidden") ? "More prompts" : "Hide prompts";
+  };
   document.addEventListener("keydown", function (e) {
     if (e.key !== "Escape") return;
     if (guideIsOpen()) closeGuide(); else if (chatIsOpen()) closeChat();

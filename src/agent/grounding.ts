@@ -49,16 +49,32 @@ export interface GroundingResult {
   text: string;
 }
 
-export function checkGrounding(answer: string, fetched: Iterable<number>, userText: string): GroundingResult {
-  const known = new Set<number>([...fetched, ...mentionedNumbers(userText)]);
-  const ungrounded = mentionedNumbers(answer).filter((n) => !known.has(n));
-  if (ungrounded.length === 0) return { ungrounded, text: answer };
+/** Trailing copy of our own warning — the model sometimes repeats the last answer. */
+const GROUNDING_WARNING =
+  /\n\nWarning: I mentioned #[\s\S]*?(?:or ask me again\.)\s*$/;
+
+export function stripGroundingWarning(text: string): string {
+  return text.replace(GROUNDING_WARNING, "").trimEnd();
+}
+
+export function checkGrounding(
+  answer: string,
+  fetched: Iterable<number>,
+  userText: string,
+  notFound: Iterable<number> = [],
+): GroundingResult {
+  const cleaned = stripGroundingWarning(answer);
+  // User-typed numbers, fetched PRs, and numbers GitHub said do not exist are all grounded.
+  // A "not found" answer that names the requested number is a tool result, not an invention.
+  const known = new Set<number>([...fetched, ...notFound, ...mentionedNumbers(userText)]);
+  const ungrounded = mentionedNumbers(cleaned).filter((n) => !known.has(n));
+  if (ungrounded.length === 0) return { ungrounded, text: cleaned };
   const list = ungrounded.map((n) => `#${n}`).join(", ");
   const one = ungrounded.length === 1;
   return {
     ungrounded,
     text:
-      `${answer}\n\nWarning: I mentioned ${list}, but ${one ? "that number is" : "those numbers are"} not in the data I fetched from GitHub for this question. ` +
+      `${cleaned}\n\nWarning: I mentioned ${list}, but ${one ? "that number is" : "those numbers are"} not in the data I fetched from GitHub for this question. ` +
       `Please ignore ${one ? "it" : "them"} or ask me again.`,
   };
 }

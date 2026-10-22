@@ -116,6 +116,26 @@ describe("public routes and headers", () => {
     expect(APP_JS).not.toMatch(/innerHTML|outerHTML|insertAdjacentHTML|document\.write/);
   });
 
+  it("leaves a gap between chat detail labels and their values", () => {
+    expect(INDEX_HTML).toMatch(/ul ul li\.kv \{[^}]*column-gap: 16px/);
+    expect(INDEX_HTML).toMatch(/grid-template-columns: max-content minmax\(0, 1fr\)/);
+    expect(INDEX_HTML).not.toMatch(/grid-template-columns: 132px/);
+  });
+
+  it("keeps one ranked list when the model writes 1. then unindented dashes", () => {
+    expect(APP_JS).toMatch(/A blank line inside a ranked list must not start a new <ol>/);
+    expect(APP_JS).toMatch(/isBullet && lastLi && \(indent >= 2 \|\| ordered\)/);
+    expect(APP_JS).not.toMatch(/if \(!list \|\| ordered !== isNumbered\)/);
+  });
+
+  it("folds a long ranked list after 3 items and reveals more in chunks", () => {
+    expect(APP_JS).toMatch(/var LIST_PREVIEW = 3/);
+    expect(APP_JS).toMatch(/var LIST_STEP = 5/);
+    expect(APP_JS).toMatch(/foldLists\(box\)/);
+    expect(APP_JS).toMatch(/Show " \+ n \+ " more \(" \+ left \+ " hidden\)/);
+    expect(INDEX_HTML).toMatch(/button\.more-prs/);
+  });
+
   it("send() does not shadow the i18n helper, so the first question actually fires", () => {
     expect(APP_JS).toMatch(/var msg = \$\("text"\)\.value\.trim\(\)/);
     expect(APP_JS).toMatch(/bubble\("bot typing", t\("chat.checking"\)\)/);

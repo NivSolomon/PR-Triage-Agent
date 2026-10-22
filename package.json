@@ -15,7 +15,8 @@
     "test:e2e": "vitest run test/e2e.test.ts",
     "test:watch": "vitest",
     "evals": "vitest run --config vitest.evals.config.ts",
-    "evals:once": "tsx --env-file-if-exists=.env evals/once.ts"
+    "evals:once": "tsx --env-file-if-exists=.env evals/once.ts",
+    "prompts": "tsx --env-file-if-exists=.env evals/bank-run.ts"
   },
   "license": "MIT",
   "dependencies": {

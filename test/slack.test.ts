@@ -298,6 +298,71 @@ describe("direct messages and mentions", () => {
     expect(s.posts[0]?.text).not.toMatch(/pull request/i);
   });
 
+  function rankedAnswer(n: number): string {
+    const items = Array.from({ length: n }, (_, i) => {
+      const k = i + 1;
+      return `${k}. #${k} Title ${k}\n- STATE: Needs review`;
+    });
+    return `Here are the details:\n\n${items.join("\n\n")}\n\nNot ready: none.`;
+  }
+
+  it("folds a long ranked answer and reveals the rest when they reply more, without another model call", async () => {
+    const s = setup({ ask: async () => ({ text: rankedAnswer(10), proposed: [], replaced: [] }) });
+    await s.channel.handleMessage({ userId: "U0ALICE", channel: "D0ALICE", text: "what is ready to merge?" });
+    expect(s.agent.ask).toHaveBeenCalledTimes(1);
+    const first = s.posts.map((p) => p.text).filter((t) => t !== THINKING_NOTE).join("\n");
+    expect(first).toMatch(/#1 Title 1/);
+    expect(first).toMatch(/#3 Title 3/);
+    expect(first).not.toMatch(/#4 Title 4/);
+    expect(first).toMatch(/7 more\. Reply more for the next 5\./);
+    expect(first).not.toMatch(/Not ready/);
+
+    s.posts.length = 0;
+    await s.channel.handleMessage({ userId: "U0ALICE", channel: "D0ALICE", text: "more" });
+    expect(s.agent.ask).toHaveBeenCalledTimes(1);
+    expect(s.posts.map((p) => p.text)).not.toContain(THINKING_NOTE);
+    const next = s.posts.map((p) => p.text).join("\n");
+    expect(next).toMatch(/#4 Title 4/);
+    expect(next).toMatch(/#8 Title 8/);
+    expect(next).not.toMatch(/#9 Title 9/);
+    expect(next).toMatch(/2 more/);
+
+    s.posts.length = 0;
+    await s.channel.handleMessage({ userId: "U0ALICE", channel: "D0ALICE", text: "show more" });
+    const last = s.posts.map((p) => p.text).join("\n");
+    expect(last).toMatch(/#9 Title 9/);
+    expect(last).toMatch(/#10 Title 10/);
+    expect(last).toMatch(/Not ready: none/);
+    expect(last).not.toMatch(/Reply more/);
+  });
+
+  it("still asks the model when 'more' is part of a real follow-up", async () => {
+    const s = setup({ ask: async () => ({ text: rankedAnswer(6), proposed: [], replaced: [] }) });
+    await s.channel.handleMessage({ userId: "U0ALICE", channel: "D0ALICE", text: "what is ready?" });
+    expect(s.agent.ask).toHaveBeenCalledTimes(1);
+    await s.channel.handleMessage({ userId: "U0ALICE", channel: "D0ALICE", text: "tell me more about #8" });
+    expect(s.agent.ask).toHaveBeenCalledTimes(2);
+    expect(s.agent.ask.mock.calls[1]?.[0]).toEqual(expect.objectContaining({ text: "tell me more about #8" }));
+  });
+
+  it("/triage more reveals the next chunk without wrapping You asked", async () => {
+    const s = setup({ ask: async () => ({ text: rankedAnswer(6), proposed: [], replaced: [] }) });
+    const first: string[] = [];
+    await s.channel.handleCommand({
+      userId: "U0ALICE",
+      text: "what is ready to merge?",
+      reply: async (t) => void first.push(t),
+    });
+    expect(first.join("\n")).toMatch(/You asked: what is ready to merge\?/);
+    expect(first.join("\n")).toMatch(/3 more/);
+    expect(s.agent.ask).toHaveBeenCalledTimes(1);
+    const more: string[] = [];
+    await s.channel.handleCommand({ userId: "U0ALICE", text: "more", reply: async (t) => void more.push(t) });
+    expect(s.agent.ask).toHaveBeenCalledTimes(1);
+    expect(more.join("\n")).toMatch(/#4 Title 4/);
+    expect(more.join("\n")).not.toMatch(/You asked: more/);
+  });
+
   it("does not share a channel-thread conversation between two people", async () => {
     const s = setup({ allowed: ["U0ALICE", "U0BOB"] });
     await s.channel.handleMessage({ userId: "U0ALICE", channel: "C0TEAM", threadTs: "111.222", text: "<@U0BOT> one" });

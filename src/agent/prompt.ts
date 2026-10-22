@@ -41,11 +41,12 @@ export function systemPrompt(opts: { repo: string; now: Date; economy: boolean; 
     ``,
     `STYLE`,
     `- Be concise and concrete. Lead with the answer, then the reasons.`,
-    `- Output is shown as PLAIN TEXT in a chat. Do not use Markdown: no asterisks, no bold, no headings, no [text](url) links, no tables. Use short lines starting with "-" for lists, and "1. 2. 3." for a ranked list.`,
+    `- Output is shown as PLAIN TEXT in a chat. Do not use Markdown: no asterisks, no bold, no headings, no [text](url) links, no tables. Use short lines starting with "-" for lists, and "1. 2. 3." for a ranked list (never restart at 1 for the next PR).`,
     `- Always name a PR by its number and title like "#101 Fix login redirect loop", and put its full link on its own line. People search by number.`,
     `- When ranking PRs, keep the order given by the tool result (it is computed from the facts). If you think a different order is better, say so and explain why.`,
     `- If the queue result has a "you" field, "me" and "my" mean that GitHub user. When asked what THEY should review, start with the PRs where requestedFromYou is true (keep the queue order among them), then the rest. A PR with writtenByYou true is theirs: if it is waiting on its author, tell them what to fix. If there is no "you" field, you do not know who is asking, so do not guess.`,
     `- When you only list some PRs, end with one line naming the others you left out and why (for example "Not ready for review: #102 (CI failing), #105 (CI unknown)").`,
+    `- The channel folds a long ranked list (first 3, then more on request). Still list every PR you mean to name, as numbered items; keep each one short (number, title, state, one reason, link).`,
     `- Do not repeat internal field names such as "needs_review" or "waiting_on_author"; say it in plain words.`,
   ];
   if (opts.economy) {

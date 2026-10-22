@@ -1,25 +1,11 @@
 ﻿import type { KnownBlock } from "@slack/types";
 import { buildGuide } from "../guide.js";
 import type { GuideAudience } from "../guide.js";
+import { SLACK_COMMANDS, SLACK_EXAMPLES } from "../prompts/bank.js";
 import { slackSafe } from "./slack-text.js";
 
 /** A section's text is limited to 3000 characters; stay clear of it. */
 const TEXT_MAX = 2800;
-
-const EXAMPLES = [
-  "What should we review first, and why?",
-  "Why is #12 blocked?",
-  "Which pull requests are ready to merge?",
-  "Leave a comment on #12 asking the author to fix CI",
-];
-
-const COMMANDS: Array<[string, string]> = [
-  ["/triage queue", "the ranked review queue (no AI credit used)"],
-  ["/triage pending", "requests waiting for approval"],
-  ["/triage digest", "the morning digest, on demand"],
-  ["/triage budget", "AI budget status"],
-  ["/triage help", "this guide as a message"],
-];
 
 const text = (mrkdwn: string): KnownBlock => ({
   type: "section",
@@ -45,8 +31,8 @@ export function homeBlocks(o: { repo: string; audience: GuideAudience; budgetLev
         "In a channel, @mention me and I reply in a thread.",
       ])}`,
     ),
-    text(`*Try asking*\n${bullets(EXAMPLES.map((e) => `\u201C${e}\u201D`))}`),
-    text(`*Quick commands* (private to you, no conversation needed)\n${bullets(COMMANDS.map(([c, d]) => `\`${c}\` ${d}`))}`),
+    text(`*Try asking*\n${bullets(SLACK_EXAMPLES.map((e) => `\u201C${e}\u201D`))}`),
+    text(`*Quick commands* (private to you, no conversation needed)\n${bullets(SLACK_COMMANDS.map(([c, d]) => `\`${c}\` ${d}`))}`),
     { type: "divider" },
   ];
   for (const s of guide.sections) blocks.push(text(`*${s.title}*\n${bullets(s.items)}`));

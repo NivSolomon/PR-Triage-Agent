@@ -1,8 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import { Agent } from "../src/agent/agent.js";
 import type { LlmPort } from "../src/agent/llm.js";
-import { checkGrounding, mentionedNumbers, notFoundNumbers, numbersInToolOutput, stripNotFoundPrUrls } from "../src/agent/grounding.js";
+import { checkGrounding, mentionedNumbers, notFoundNumbers, numbersInToolOutput, stripGroundingWarning, stripNotFoundPrUrls } from "../src/agent/grounding.js";
 import { BudgetService } from "../src/budget/service.js";
+import { GitHubError } from "../src/github/client.js";
 import { openDatabase } from "../src/store/db.js";
 
 describe("grounding helpers", () => {
@@ -22,6 +23,20 @@ describe("grounding helpers", () => {
     expect(checkGrounding("#101 first, then #102", [101, 102], "what first?").ungrounded).toEqual([]);
     expect(checkGrounding("About #999: I could not find it.", [], "status of #999?").ungrounded).toEqual([]);
     expect(checkGrounding("A comment on #3 is waiting for approval.", [], "write a comment on PR 3").ungrounded).toEqual([]);
+  });
+
+  it("treats a number GitHub reported as missing as grounded", () => {
+    expect(checkGrounding("Pull request #14 was not found.", [], "Why is #N blocked?", [14]).ungrounded).toEqual([]);
+    expect(checkGrounding("Pull request #14 was not found.", [], "Why is #N blocked?", [14]).text).not.toMatch(/Warning:/);
+  });
+
+  it("does not append a second warning when the model copied the last one", () => {
+    const copied =
+      "Pull request #14 was not found.\n\nWarning: I mentioned #14, but that number is not in the data I fetched from GitHub for this question. Please ignore it or ask me again.";
+    const r = checkGrounding(copied, [], "Why is #N blocked?", [14]);
+    expect(r.ungrounded).toEqual([]);
+    expect(r.text).toBe("Pull request #14 was not found.");
+    expect(stripGroundingWarning(copied)).toBe("Pull request #14 was not found.");
   });
 
   it("flags a number that was never fetched and appends a visible warning", () => {
@@ -68,5 +83,36 @@ describe("Agent applies the grounding check", () => {
     expect(res.text).toMatch(/Warning: I mentioned #404/);
     expect(res.text).not.toMatch(/Warning: I mentioned #101/);
     expect(warn).toHaveBeenCalledWith(expect.stringContaining("404"));
+  });
+
+  it("does not warn when GitHub said the named PR does not exist", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    let call = 0;
+    const llm: LlmPort = {
+      model: "fake",
+      async complete() {
+        call += 1;
+        return call === 1
+          ? { content: null, toolCalls: [{ id: "t", name: "get_pull_request", arguments: '{"number":14}' }], usage: { inputTokens: 1, outputTokens: 1 } }
+          : { content: "Pull request #14 was not found.", toolCalls: [], usage: { inputTokens: 1, outputTokens: 1 } };
+      },
+    };
+    const agent = new Agent({
+      llm,
+      tools: {
+        github: {
+          repo: "a/b",
+          listOpenPrs: async () => [] as never,
+          getPr: async () => {
+            throw new GitHubError("Not found on GitHub (a/b).", 404);
+          },
+        },
+        approvals: { propose: vi.fn() } as never,
+      },
+      budget: new BudgetService({ db: openDatabase(":memory:"), monthlyBudgetUsd: 50, hostingUsd: 7, pricePerMInput: 1, pricePerMOutput: 1, dailyRequestsPerActor: 40 }),
+    });
+    const res = await agent.ask({ conversationId: "c", text: "Why is #N blocked?", actor: "a", via: "web", canPropose: false });
+    expect(res.text).toBe("Pull request #14 was not found.");
+    expect(warn).not.toHaveBeenCalled();
   });
 });

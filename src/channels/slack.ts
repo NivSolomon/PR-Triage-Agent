@@ -14,7 +14,9 @@ import { slackSafe } from "./slack-text.js";
 import { count } from "../text/en.js";
 import { buildQueue } from "../triage/queue.js";
 import { decide, renderBudget, renderQueue, splitMessage } from "./shared.js";
+import { SLACK_COMMANDS, SLACK_EXAMPLES } from "../prompts/bank.js";
 import type { DecisionKind } from "./shared.js";
+import { FoldedLists, isMoreRequest } from "../text/fold-list.js";
 
 /** Slack recommends keeping a message under ~4000 characters; a block's text is limited to 3000. */
 const MESSAGE_MAX = 3500;
@@ -367,17 +369,10 @@ export function helpText(isApprover: boolean): string {
     "",
     "How to talk to me: message me directly (the app's Messages tab). Your questions and my answers stay in the conversation. In a channel, @mention me and I reply in a thread. If you edit a DM or an @mention, I treat the new text as a new question.",
     "Examples:",
-    "- What should we review first?",
-    "- Why is #12 blocked?",
-    "- Leave a comment on #12 asking the author to fix CI. An approver must approve it first.",
+    ...SLACK_EXAMPLES.map((e) => `- ${e}`),
     "",
     "Quick commands (replies are private to you and temporary):",
-    "/triage queue - ranked review queue (no AI credit used)",
-    "/triage pending - actions waiting for approval",
-    "/triage digest - the morning digest, on demand",
-    "/triage budget - AI budget status",
-    "/triage <question> - ask without opening the conversation",
-    "/triage help - this message",
+    ...SLACK_COMMANDS.map(([c, d]) => `${c} - ${d}`),
   ].join("\n");
 }
 
@@ -418,6 +413,8 @@ export class SlackChannel {
   private readonly allowed: Set<string>;
   private readonly approvers: Set<string>;
   private readonly busy = new Set<string>();
+  /** Hidden tail of a long ranked list, revealed with "more" without another model call. */
+  private readonly folded = new FoldedLists();
 
   constructor(private readonly d: SlackDeps) {
     this.api = d.api;
@@ -578,8 +575,9 @@ export class SlackChannel {
     if (isCommand && word === "queue") return this.guarded(p.userId, say, async () => {
       try {
         const login = this.githubLogin(p.userId);
-        const text = renderQueue(await buildQueue(this.d.github), login ? { login } : undefined);
-        await say(login || !this.hasGithubMap() ? text : `${text}\n\n${this.UNLINKED_TIP}`);
+        const raw = renderQueue(await buildQueue(this.d.github), login ? { login } : undefined);
+        const text = login || !this.hasGithubMap() ? raw : `${raw}\n\n${this.UNLINKED_TIP}`;
+        await say(this.folded.foldOutgoing(`slack:${p.userId}`, text));
       } catch (err) {
         await say(`I could not load the queue: ${err instanceof Error ? err.message : "unknown error"}`);
       }
@@ -597,6 +595,10 @@ export class SlackChannel {
     // Anything else is a question for the assistant. A slash command does not leave the question in the
     // chat and its reply is private and temporary, so the answer repeats the question to make sense alone.
     const question = p.text.trim();
+    if (isMoreRequest(question)) {
+      const next = this.folded.take(`slack:${p.userId}`);
+      if (next) return say(next.text);
+    }
     let first = true;
     return this.converse({
       userId: p.userId,
@@ -623,6 +625,12 @@ export class SlackChannel {
     const text = this.stripMention(p.text);
     if (text === "" || /^help$/i.test(text)) return post(helpText(this.isApprover(slackActor(p.userId), p.teamId)));
 
+    const conversationId = `slack:${p.channel}:${p.threadTs ?? "root"}:${p.userId}`;
+    if (isMoreRequest(text)) {
+      const next = this.folded.take(conversationId);
+      if (next) return post(next.text);
+    }
+
     // A visible "thinking" note, replaced by the answer. Failing to show it must never block the answer.
     let placeholder: string | undefined;
     try {
@@ -639,7 +647,7 @@ export class SlackChannel {
 
     return this.converse({
       userId: p.userId,
-      conversationId: `slack:${p.channel}:${p.threadTs ?? "root"}:${p.userId}`,
+      conversationId,
       text,
       say: async (t) => {
         await clear();
@@ -803,7 +811,7 @@ export class SlackChannel {
         canPropose: true, // anyone on the access list may *ask*; only approvers can approve
         githubLogin: this.githubLogin(p.userId),
       });
-      await p.say(result.text);
+      await p.say(this.folded.foldOutgoing(p.conversationId, result.text));
       for (const record of result.proposed) {
         const mine = result.replaced.filter((a) => a.prNumber === record.prNumber);
         const n = await this.sendApprovalCards(record, mine);
