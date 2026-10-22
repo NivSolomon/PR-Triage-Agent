@@ -30,7 +30,7 @@ export interface McpDeps {
   agent: Agent;
   tools: ToolDeps;
   /** A request created over MCP must reach the human approvers. */
-  onProposed?: (record: ActionRecord) => Promise<void> | void;
+  onProposed?: (record: ActionRecord, replaced?: ActionRecord[]) => Promise<void> | void;
 }
 
 interface Caller {
@@ -61,8 +61,8 @@ function buildMcpServer(caller: Caller, deps: McpDeps): McpServer {
     actor: caller.actor,
     via: "mcp",
     canPropose: caller.role === "proposer",
-    onProposed: (a) => {
-      void Promise.resolve(deps.onProposed?.(a)).catch((err) =>
+    onProposed: (a, replaced) => {
+      void Promise.resolve(deps.onProposed?.(a, replaced)).catch((err) =>
         console.error("Could not forward the approval request:", err instanceof Error ? err.message : err),
       );
     },
@@ -109,7 +109,10 @@ function buildMcpServer(caller: Caller, deps: McpDeps): McpServer {
         via: "mcp",
         canPropose: ctx.canPropose,
       });
-      for (const record of result.proposed) await Promise.resolve(deps.onProposed?.(record));
+      for (const record of result.proposed) {
+        const mine = result.replaced.filter((a) => a.prNumber === record.prNumber);
+        await Promise.resolve(deps.onProposed?.(record, mine));
+      }
       return text(result.text);
     },
   );

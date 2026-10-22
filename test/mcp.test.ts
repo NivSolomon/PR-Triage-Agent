@@ -25,13 +25,11 @@ async function start() {
   };
   const approvals = {
     propose: vi.fn(async (i: { prNumber: number; body: string }) => ({
-      id: "act-1",
-      status: "pending",
-      prNumber: i.prNumber,
-      body: i.body,
+      record: { id: "act-1", status: "pending", prNumber: i.prNumber, body: i.body },
+      replaced: [],
     })),
   };
-  const agent = { ask: vi.fn(async () => ({ text: "answer", proposed: [] as never[] })) };
+  const agent = { ask: vi.fn(async () => ({ text: "answer", proposed: [] as never[], replaced: [] as never[] })) };
   const onProposed = vi.fn();
   const app = express();
   app.use(express.json());

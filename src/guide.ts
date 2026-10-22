@@ -38,7 +38,7 @@ export function buildGuide(audience: GuideAudience, opts: GuideOptions): Guide {
   const can: string[] = [
     "See the open pull requests ranked by what to review first, with the reasons, a confidence level and a link to each (no AI credit used).",
     "Ask in plain language: what is blocked and why, what is ready to merge, what is stale, what one PR is about, its CI status, reviews and branches.",
-    "Ask for a comment to be left on a pull request. The agent only drafts it: nothing is posted until an approver approves it (an approver may correct the wording first).",
+    "Ask for a comment to be left on a pull request. Say the wording, or what it should ask (for example to fix CI). The agent only drafts it: nothing is posted until an approver approves it (an approver may correct the wording first).",
     "Read the morning digest the agent sends on weekdays without being asked (in the team's digest channel, or as a direct message to approvers). You can also ask for it at any time.",
   ];
   if (approver) {
@@ -68,7 +68,7 @@ export function buildGuide(audience: GuideAudience, opts: GuideOptions): Guide {
               "Pressing Approve twice, or two approvers pressing it, still posts once. A request that nobody decides expires after 24 hours and posts nothing.",
             ]
           : [
-              "Your request goes to the approvers with the exact text. An approver may correct the wording before approving; the history keeps the original draft and shows what was posted. You can follow it: Slack tells you when an approver decides, and the web page History lists every request and its status.",
+              "Your request goes to the approvers with the exact text. An approver may correct the wording before approving; the history keeps the original draft and shows what was posted. If you ask again to change the wording on the same PR, the previous pending request is withdrawn and only the new text can be approved. You can follow it: Slack tells you when an approver decides, and the web page History lists every request and its status.",
               "A request that nobody decides expires after 24 hours and posts nothing.",
               "Programs that connect to this agent (MCP) are limited the same way: they can look, ask, and at most request a comment, never approve one.",
             ],

@@ -1,19 +1,27 @@
 import { describe, expect, it, vi } from "vitest";
 import { Agent } from "../src/agent/agent.js";
 import type { LlmPort } from "../src/agent/llm.js";
-import { checkGrounding, mentionedNumbers, numbersInToolOutput } from "../src/agent/grounding.js";
+import { checkGrounding, mentionedNumbers, notFoundNumbers, numbersInToolOutput, stripNotFoundPrUrls } from "../src/agent/grounding.js";
 import { BudgetService } from "../src/budget/service.js";
 import { openDatabase } from "../src/store/db.js";
 
 describe("grounding helpers", () => {
   it("extracts PR numbers from text and from tool JSON", () => {
     expect(mentionedNumbers("see #12, #12 and #7; not 99 or a#b")).toEqual([12, 7]);
+    expect(mentionedNumbers("write a comment on PR 3")).toEqual([3]);
+    expect(mentionedNumbers("status of pull request 12 and PR#7")).toEqual([12, 7]);
+    expect(mentionedNumbers("the PR Triage Agent")).toEqual([]);
     expect(numbersInToolOutput('{"queue":[{"number":101},{"number": 102}],"x":{"prNumber":103}}')).toEqual([101, 102, 103]);
+    expect(notFoundNumbers('{"error":"missing","notFound":true,"requestedNumber":999}')).toEqual([999]);
+    expect(
+      stripNotFoundPrUrls("Missing.\nhttps://github.com/acme/app/pull/999\nDone.", [999]),
+    ).toBe("Missing.\n\nDone.");
   });
 
   it("passes answers whose numbers all came from fetched data or the user's own question", () => {
     expect(checkGrounding("#101 first, then #102", [101, 102], "what first?").ungrounded).toEqual([]);
     expect(checkGrounding("About #999: I could not find it.", [], "status of #999?").ungrounded).toEqual([]);
+    expect(checkGrounding("A comment on #3 is waiting for approval.", [], "write a comment on PR 3").ungrounded).toEqual([]);
   });
 
   it("flags a number that was never fetched and appends a visible warning", () => {

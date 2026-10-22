@@ -5,7 +5,7 @@ It answers only from live GitHub data, explains its reasoning with a confidence 
 review comment on a pull request **only after a human approves that exact comment**.
 
 Design reasoning, trade-offs, cost estimate, evals and the answers to the understanding questions are in
-[`DECISIONS.md`](DECISIONS.md). The architecture diagram is in [`docs/architecture.pdf`](docs/architecture.pdf).
+[`DECISIONS.md`](DECISIONS.md). The architecture diagram is in [`docs/architecture.pdf`](docs/architecture.pdf). Editable Draw.io source: [`docs/architecture.drawio`](docs/architecture.drawio).
 
 **Live deployment:** https://pr-triage-agent.fly.dev (Fly.io, Frankfurt, one always-on machine with a persistent volume). First deployed 2026-10-21. Health check: [/healthz](https://pr-triage-agent.fly.dev/healthz). Slack is the main channel; the web page asks for a key (shared with testers separately).
 
@@ -40,13 +40,13 @@ Design reasoning, trade-offs, cost estimate, evals and the answers to the unders
 
 ### The web page
 
-One page with no build step, in light or dark theme (a button in the top bar), using only system fonts and no third-party requests.
+One page with no build step, in light or dark theme and English or Hebrew (buttons in the top bar), using only system fonts and no third-party requests.
 
 - **Review queue:** summary tiles by state (click one to filter), search, confidence, author and sort filters, "only with warnings" and "hide drafts". Each PR is a card that expands to show a score breakdown (a waterfall from 50 to the final score, one bar per signal with the fact behind it), a confidence meter, and a button that opens the PR on GitHub. **Expand all / Collapse all** is available.
-- **Ask the agent:** a side drawer opened by the floating button at the bottom right. It closes with the **Close** button, **Esc**, or a click anywhere outside it. Answers are laid out as readable sections (the recommendation, then the PRs with their reasons and links), not one block of text.
-- **Approvals:** **Pending** and **History** tabs. Each request is a collapsible card with a status badge (a rejected request is red, a posted one green), a small flow diagram (Requested, Approval, Posted), and a link button to the posted comment.
+- **Ask the agent:** a side drawer opened by the floating button at the bottom right. It closes with the **Close** button, **Esc**, or a click anywhere outside it. Questions are capped at 2000 characters (the box shows a counter). An idle session that expires does not wipe the chat: sign in again and continue. Answers are laid out as readable sections (the recommendation, then the PRs with their reasons and links), not one block of text.
+- **Approvals:** **Pending** and **History** tabs. Pending requests are always listed, even when the history is long. Each request is a collapsible card with a status badge (a rejected request is red, a posted one green), a small flow diagram (Requested, Approval, Posted), and a link button to the posted comment. Approve and Reject each ask for a second click that stays until you confirm or Cancel. A draft that `@`-mentions someone is labelled so the approver knows GitHub will notify them. Approve does nothing if the pull request has already closed. When a request is replaced, rejected or expires, the Slack cards that still showed Approve buttons are updated in place.
 - **Scheduled digest:** a read-only panel showing the schedule and its time zone, the next run, where the digest is delivered, whether the last run worked, the last message that was sent, and earlier runs. Each run is recorded in the database, so this survives a restart. It cannot start a run (a run posts to the team channel).
-- **Always current, without a hard refresh:** the page script has a version in its address (a deploy changes it, so a new version loads by itself), the page itself is never cached, and `/api` is never cached. The queue is read from GitHub at most once a minute for everyone together (a **Reload** press forces a fresh read, at most once every 10 seconds). There is no polling of GitHub in the background: when you return to the tab after a few minutes the queue refreshes quietly, and the approvals list (local database only) refreshes every 30 seconds while the tab is visible.
+- **Always current, without a hard refresh:** the page script has a version in its address (a deploy changes it, so a new version loads by itself), the page itself is never cached, and `/api` is never cached. The queue is read from GitHub at most once a minute for everyone together (a **Reload** press forces a fresh read, at most once every 10 seconds). When you return to the tab after a few minutes, or stay on it, a stale queue refreshes quietly; the approvals list (local database only) refreshes every 30 seconds while the tab is visible. Sessions are stored in SQLite, so a deploy does not sign everyone out.
 - **What each key can do:** a *reader* can look, ask and request a comment, but cannot approve or reject (the server answers 403). An *approver* can also approve, edit and reject. No key can merge, approve, close or edit a pull request on GitHub: the only thing the app ever writes there is one comment, after an approver approves that exact text.
 
 ## Slack setup (5 minutes, once)
@@ -63,7 +63,9 @@ firewall changes, and it works the same on a laptop and on a server.
 5. Invite the app to the channel testers will use (`/invite @PR Triage Agent`) and put that channel ID in `SLACK_DIGEST_CHANNEL_ID` (morning digest, and the approval cards testers click).
 
 Permissions requested (all in the manifest): `commands`, `chat:write`, `chat:write.public`, `app_mentions:read`,
-`im:history`, `im:write`. The app cannot read channel history, files or user profiles.
+`im:history`, `im:write`, `channels:history`, `groups:history`. Channel history is only used so an edited @mention
+is treated as a new question (Slack does not re-send `app_mention` on edit). The app cannot read files or user profiles.
+If this app is already installed, paste the updated manifest and **reinstall** so the new scopes apply.
 
 **Guide inside Slack.** Open the app in Slack: the **Home** tab shows a short guide (how to talk to it, example questions, the commands, what nobody can do, how approval works), written from the same source as the web page and /triage help. The **About** tab holds a summary from the manifest's long_description. If you change the manifest later, paste it again under **App Manifest** in the app's settings and reinstall the app.
 
@@ -87,7 +89,7 @@ Secrets are **never committed**. Locally they live in `.env` (git-ignored); in p
 
 | Variable | Required | Purpose |
 |---|---|---|
-| `GITHUB_TOKEN` | yes | Fine-grained token for one repo: Pull requests (r/w), Issues (r/w), Contents (read), Metadata (read) |
+| `GITHUB_TOKEN` | yes | Fine-grained token for one repo: **Issues (read/write)** for comments, **Pull requests (read)**, Contents (read), Checks (read), Metadata (read). Do not grant Pull requests write: this app never merges, closes or edits a PR. |
 | `GITHUB_REPO` | yes | `owner/repo` the agent works on |
 | `LLM_API_KEY` | yes | Key for any OpenAI-compatible API |
 | `LLM_BASE_URL`, `LLM_MODEL` | no | Default OpenAI and `gpt-4o-mini` |
@@ -99,10 +101,10 @@ Secrets are **never committed**. Locally they live in `.env` (git-ignored); in p
 | `SLACK_APPROVER_USER_IDS` | yes | Comma-separated member IDs allowed to approve (also allowed to chat) |
 | `SLACK_GITHUB_USERS` | no | `U01ABCDEF:octocat,...` links Slack members to GitHub logins, so `/triage queue` and questions like "what should I review?" are personal (review requests for you first, then your own PRs) |
 | `SLACK_DIGEST_CHANNEL_ID` | no | Channel ID (`C01ABCDEF`) for the weekday digest and, when `SLACK_ALLOW_ALL_MEMBERS=true`, the approval cards testers click. Defaults to a DM to every named approver |
-| `WEB_USERS` | for the web page (recommended) | JSON `{"dana":{"key":"<16+ chars>","role":"approver"},"lee":{"key":"<16+ chars>","role":"reader"}}`. One key per person; each key must be different |
+| `WEB_USERS` | for the web page (recommended) | JSON `{"dana":{"key":"<16+ chars>","role":"approver","github":"octocat"},"lee":{"key":"<16+ chars>","role":"reader"}}`. One key per person; each key must be different. Optional `github` login groups the web queue like Slack |
 | `WEB_ACCESS_KEY`, `WEB_APPROVER_KEY` | no (older alternative) | 16+ chars each, different from each other. Shared by everyone who holds them. Read/chat, and approve, respectively |
 | `TRUST_PROXY` | no | Number of reverse proxies in front (`1` on Fly.io, set in `fly.toml`; default `0`). Without it the login lockout cannot tell visitors apart |
-| `AUTH_MAX_FAILURES` | no | Wrong keys or tokens allowed per address in 10 minutes before it is paused (web login and MCP). Default `10`. `0` turns the pause off, which is fine on a private machine; keep the default on a public server |
+| `AUTH_MAX_FAILURES` | no | Wrong keys or tokens allowed per address in 10 minutes before it is paused (web login and MCP). Default `10`. `0` turns the pause off on a private machine (`TRUST_PROXY=0` only); a public host with `TRUST_PROXY` set refuses `0` |
 | `MCP_TOKENS` | for MCP | JSON `{"<16+ char token>":"reader"\|"proposer"}` |
 | `MONTHLY_BUDGET_USD`, `HOSTING_COST_USD`, `DAILY_REQUESTS_PER_USER` | no | Defaults 50, 7, 40 |
 | `DIGEST_CRON`, `TZ` | no | Default `30 8 * * 1-5`, server time zone |

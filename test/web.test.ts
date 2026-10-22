@@ -29,7 +29,7 @@ const USERS = [
 ];
 
 async function start(
-  over: { accessKey?: string; approverKey?: string; users?: typeof USERS; trustProxy?: number; sessions?: SessionStore; maxFailures?: number; digest?: DigestInfo } = {
+  over: { accessKey?: string; approverKey?: string; users?: Array<{ name: string; key: string; role: "reader" | "approver"; github?: string }>; trustProxy?: number; sessions?: SessionStore; maxFailures?: number; digest?: DigestInfo } = {
     accessKey: READER,
     approverKey: APPROVER,
   },
@@ -56,7 +56,7 @@ async function start(
     pricePerMOutput: 0.6,
     dailyRequestsPerActor: 40,
   });
-  const agent = { ask: vi.fn(async () => ({ text: "Review #7 first.", proposed: [] as never[] })) };
+  const agent = { ask: vi.fn(async () => ({ text: "Review #7 first.", proposed: [] as never[], replaced: [] as never[] })) };
   const onProposed = vi.fn();
   const app = createWebApp({
     ...over,
@@ -115,6 +115,24 @@ describe("public routes and headers", () => {
   it("the page script never uses innerHTML (untrusted text is written as text only)", () => {
     expect(APP_JS).not.toMatch(/innerHTML|outerHTML|insertAdjacentHTML|document\.write/);
   });
+
+  it("the chat box caps questions at 2000 characters and does not silently drop Confirm", () => {
+    expect(INDEX_HTML).toMatch(/id="text"[^>]*maxlength="2000"/);
+    expect(APP_JS).toMatch(/CHAT_MAX = 2000/);
+    expect(APP_JS).toMatch(/Keep the question under /);
+    expect(APP_JS).not.toMatch(/setTimeout\(disarm, 8000\)/);
+    expect(APP_JS).toMatch(/stay armed until they confirm or Cancel/);
+  });
+
+  it("keeps the chat after an idle 401, confirms Reject, ignores IME Enter, and can switch to Hebrew", () => {
+    expect(APP_JS).toMatch(/session.expired/);
+    expect(APP_JS).not.toMatch(/if \(path !== "\/api\/login"\) signOut\(false\)/);
+    expect(APP_JS).toMatch(/armedKind === "reject"/);
+    expect(APP_JS).toMatch(/e.isComposing/);
+    expect(APP_JS).toMatch(/refreshIfStale\(\);/);
+    expect(INDEX_HTML).toMatch(/id="lang"/);
+    expect(APP_JS).toMatch(/var I18N = /);
+  });
 });
 
 describe("caching: a deploy shows up without a hard refresh", () => {
@@ -151,10 +169,18 @@ describe("the shared review queue", () => {
 
   it("lets Refresh ask for fresh data, but not more than once every few seconds", async () => {
     const { call, github } = await start();
-    await call("/api/queue", { key: READER });
+    const first = await (await call("/api/queue", { key: READER })).json();
+    expect(first.cached).toBe(false);
+    const again = await (await call("/api/queue", { key: READER })).json();
+    expect(again.cached).toBe(true);
     await call("/api/queue?refresh=1", { key: READER });
-    await call("/api/queue?refresh=1", { key: READER });
+    const refresh = await (await call("/api/queue?refresh=1", { key: READER })).json();
+    expect(refresh.cached).toBe(true);
     expect(github.listOpenPrs).toHaveBeenCalledTimes(1); // both Refresh clicks landed inside the 10 s window
+  });
+
+  it("the refresh toast does not claim a fresh GitHub read when the cache was served", () => {
+    expect(APP_JS).toMatch(/Queue is already up to date/);
   });
 
   it("refreshes after the cache expires, and does not cache a failure", async () => {
@@ -191,10 +217,23 @@ describe("authentication", () => {
     expect(await (await call("/api/me", { key: APPROVER })).json()).toMatchObject({ role: "approver" });
   });
 
-  it("locks out an address after repeated wrong keys", async () => {
+  it("locks out further guesses after repeated wrong keys, but a valid key still works", async () => {
     const { call } = await start();
     for (let i = 0; i < 10; i += 1) await call("/api/me", { key: "wrong-wrong-wrong-0" });
-    expect((await call("/api/me", { key: READER })).status).toBe(429);
+    expect((await call("/api/me", { key: "wrong-wrong-wrong-0" })).status).toBe(429);
+    expect((await call("/api/me", { key: READER })).status).toBe(200);
+  });
+
+  it("a valid session cookie is not locked out by other people's wrong keys on the same address", async () => {
+    const { call } = await start();
+    const { cookie } = await (async () => {
+      const res = await call("/api/login", { body: { key: READER } });
+      const set = res.headers.get("set-cookie") ?? "";
+      return { cookie: set.split(";")[0] ?? "" };
+    })();
+    for (let i = 0; i < 10; i += 1) await call("/api/me", { key: "wrong-wrong-wrong-0" });
+    expect((await call("/api/me", { key: "wrong-wrong-wrong-0" })).status).toBe(429);
+    expect((await call("/api/me", { headers: { Cookie: cookie } })).status).toBe(200);
   });
 
   it("never pauses an address when the lockout is turned off (maxFailures 0)", async () => {
@@ -247,7 +286,8 @@ describe("signing in with a session cookie", () => {
     expect(bad.res.status).toBe(401);
     expect(bad.set).toBe("");
     for (let i = 0; i < 9; i += 1) await login(call, "wrong-wrong-wrong-0");
-    expect((await login(call, READER)).res.status).toBe(429);
+    expect((await login(call, "wrong-wrong-wrong-0")).res.status).toBe(429);
+    expect((await login(call, READER)).res.status).toBe(200);
   });
 
   it("opening the page without a session is not counted as an attack", async () => {
@@ -309,8 +349,9 @@ describe("signing in with a session cookie", () => {
     const { call } = await start({ accessKey: READER, trustProxy: 1 });
     const from = (ip: string) => ({ "X-Forwarded-For": ip });
     for (let i = 0; i < 10; i += 1) await call("/api/login", { body: { key: "wrong-wrong-wrong-0" }, headers: from("203.0.113.9") });
-    expect((await call("/api/login", { body: { key: READER }, headers: from("203.0.113.9") })).status).toBe(429);
-    expect((await call("/api/login", { body: { key: READER }, headers: from("198.51.100.4") })).status).toBe(200);
+    expect((await call("/api/login", { body: { key: "wrong-wrong-wrong-0" }, headers: from("203.0.113.9") })).status).toBe(429);
+    expect((await call("/api/login", { body: { key: READER }, headers: from("203.0.113.9") })).status).toBe(200);
+    expect((await call("/api/login", { body: { key: "wrong-wrong-wrong-0" }, headers: from("198.51.100.4") })).status).toBe(401);
   });
 });
 
@@ -327,6 +368,28 @@ describe("a key for each person", () => {
     expect(agent.ask).toHaveBeenCalledWith(expect.objectContaining({ actor: "web:lee" }));
   });
 
+  it("groups the queue for a person whose WEB_USERS entry has a GitHub login", async () => {
+    const users = [
+      { name: "dana", key: DANA, role: "approver" as const, github: "octocat" },
+      { name: "lee", key: LEE, role: "reader" as const },
+    ];
+    const { call, agent } = await start({ users });
+    expect(await (await call("/api/me", { key: DANA })).json()).toMatchObject({ githubLogin: "octocat" });
+    expect(await (await call("/api/me", { key: LEE })).json()).toMatchObject({ githubLogin: null });
+    const queue = await (await call("/api/queue", { key: DANA })).json();
+    expect(queue.you).toMatchObject({ login: "octocat", forYou: [], yours: [], others: [] });
+    expect(await (await call("/api/queue", { key: LEE })).json()).toMatchObject({ you: null });
+    await call("/api/chat", { key: DANA, body: { text: "what first?", conversationId: "abcdefgh-1234" } });
+    expect(agent.ask).toHaveBeenCalledWith(expect.objectContaining({ githubLogin: "octocat" }));
+  });
+
+  it("keeps a session across SessionStore instances that share a database", () => {
+    const db = openDatabase(":memory:");
+    const first = new SessionStore({ db });
+    const id = first.create({ name: "dana", role: "approver", actor: "web:dana", githubLogin: "octocat" });
+    expect(new SessionStore({ db }).get(id)).toMatchObject({ actor: "web:dana", githubLogin: "octocat" });
+  });
+
   it("keeps each person's conversation separate, even with the same conversation id", async () => {
     const { call, agent } = await start({ users: USERS });
     const body = { text: "hi", conversationId: "abcdefgh-1234" };
@@ -338,7 +401,7 @@ describe("a key for each person", () => {
 
   it("an approver-role person can approve, a reader-role person cannot, and the audit names the approver", async () => {
     const { call, approvals, github } = await start({ users: USERS });
-    const rec = await approvals.propose({ prNumber: 7, body: "Please fix CI", reason: "CI red", requestedBy: "web:lee", via: "web" });
+    const rec = (await approvals.propose({ prNumber: 7, body: "Please fix CI", reason: "CI red", requestedBy: "web:lee", via: "web" })).record;
     expect((await call(`/api/actions/${rec.id}/approve`, { key: LEE, method: "POST", body: {} })).status).toBe(403);
     expect(github.postComment).not.toHaveBeenCalled();
     expect((await call(`/api/actions/${rec.id}/approve`, { key: DANA, method: "POST", body: {} })).status).toBe(200);
@@ -348,7 +411,7 @@ describe("a key for each person", () => {
 
   it("an approver can correct the text while approving; the corrected text is what is posted", async () => {
     const { call, approvals, github } = await start({ users: USERS });
-    const rec = await approvals.propose({ prNumber: 7, body: "Original draft", reason: "r", requestedBy: "web:lee", via: "web" });
+    const rec = (await approvals.propose({ prNumber: 7, body: "Original draft", reason: "r", requestedBy: "web:lee", via: "web" })).record;
     const res = await call(`/api/actions/${rec.id}/approve`, { key: DANA, method: "POST", body: { body: "Corrected by Dana" } });
     expect(res.status).toBe(200);
     expect(((await res.json()) as { text: string }).text).toMatch(/edited comment/);
@@ -358,7 +421,7 @@ describe("a key for each person", () => {
 
   it("a reader cannot use the edit field to change anything", async () => {
     const { call, approvals, github } = await start({ users: USERS });
-    const rec = await approvals.propose({ prNumber: 7, body: "Original draft", reason: "r", requestedBy: "web:lee", via: "web" });
+    const rec = (await approvals.propose({ prNumber: 7, body: "Original draft", reason: "r", requestedBy: "web:lee", via: "web" })).record;
     expect((await call(`/api/actions/${rec.id}/approve`, { key: LEE, method: "POST", body: { body: "Hijacked" } })).status).toBe(403);
     expect(github.postComment).not.toHaveBeenCalled();
     expect(approvals.get(rec.id)).toMatchObject({ status: "pending", body: "Original draft", originalBody: null });
@@ -366,7 +429,7 @@ describe("a key for each person", () => {
 
   it("refuses a malformed or empty edit without posting, and the request stays pending", async () => {
     const { call, approvals, github } = await start({ users: USERS });
-    const rec = await approvals.propose({ prNumber: 7, body: "Original draft", reason: "r", requestedBy: "web:lee", via: "web" });
+    const rec = (await approvals.propose({ prNumber: 7, body: "Original draft", reason: "r", requestedBy: "web:lee", via: "web" })).record;
     expect((await call(`/api/actions/${rec.id}/approve`, { key: DANA, method: "POST", body: { body: 42 } })).status).toBe(400);
     expect((await call(`/api/actions/${rec.id}/approve`, { key: DANA, method: "POST", body: { body: "   " } })).status).toBe(409);
     expect(github.postComment).not.toHaveBeenCalled();
@@ -375,7 +438,7 @@ describe("a key for each person", () => {
 
   it("rejecting ignores any edit text", async () => {
     const { call, approvals, github } = await start({ users: USERS });
-    const rec = await approvals.propose({ prNumber: 7, body: "Original draft", reason: "r", requestedBy: "web:lee", via: "web" });
+    const rec = (await approvals.propose({ prNumber: 7, body: "Original draft", reason: "r", requestedBy: "web:lee", via: "web" })).record;
     expect((await call(`/api/actions/${rec.id}/reject`, { key: DANA, method: "POST", body: { body: "Ignored" } })).status).toBe(200);
     expect(github.postComment).not.toHaveBeenCalled();
     expect(approvals.get(rec.id)).toMatchObject({ status: "rejected", body: "Original draft", originalBody: null });
@@ -492,7 +555,7 @@ describe("chat", () => {
 describe("approvals over the web", () => {
   async function withPending() {
     const ctx = await start();
-    const rec = await ctx.approvals.propose({ prNumber: 7, body: "Please fix CI", reason: "CI red", requestedBy: "web:reader", via: "web" });
+    const rec = (await ctx.approvals.propose({ prNumber: 7, body: "Please fix CI", reason: "CI red", requestedBy: "web:reader", via: "web" })).record;
     return { ...ctx, id: rec.id };
   }
 
@@ -527,5 +590,28 @@ describe("approvals over the web", () => {
     expect((await call("/api/actions/does-not-exist/approve", { key: APPROVER, method: "POST", body: {} })).status).toBe(409);
     expect((await call("/api/actions/a%20b/approve", { key: APPROVER, method: "POST", body: {} })).status).toBe(400);
     expect(github.postComment).not.toHaveBeenCalled();
+  });
+
+  it("GET /api/actions still returns a pending request when later history would fill the cap", async () => {
+    const { call, approvals } = await start();
+    const old = (await approvals.propose({
+      prNumber: 99,
+      body: "Please fix CI",
+      reason: "CI red",
+      requestedBy: "web:reader",
+      via: "web",
+    })).record;
+    for (let i = 0; i < 20; i += 1) {
+      const a = (await approvals.propose({
+        prNumber: i + 1,
+        body: "Please fix CI",
+        reason: "CI red",
+        requestedBy: `web:u${i}`,
+        via: "web",
+      })).record;
+      await approvals.approve(a.id, APPROVER_ACTOR);
+    }
+    const list = await (await call("/api/actions", { key: READER })).json();
+    expect(list.actions.some((a: { id: string; status: string }) => a.id === old.id && a.status === "pending")).toBe(true);
   });
 });

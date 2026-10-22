@@ -1,5 +1,10 @@
 import type { ActionRecord } from "../store/actions.js";
 
+/** True when the draft would notify someone on GitHub (`@login` at a word boundary, not an email). */
+export function containsAtMention(body: string): boolean {
+  return /(^|[^A-Za-z0-9_])@[A-Za-z0-9]/.test(body);
+}
+
 /**
  * Plain-text approval card, shared by every channel so the approver always sees the same facts:
  * what will happen, on what, the exact text, why, who asked, and when it expires.
@@ -18,6 +23,9 @@ export function renderApprovalCard(a: ActionRecord): string {
       .map((l) => `> ${l}`)
       .join("\n"),
     ``,
+    ...(containsAtMention(a.body)
+      ? [`This comment @-mentions someone. Approving will notify them on GitHub.`, ``]
+      : []),
     ...(a.originalBody
       ? [
           `Edited by the approver before posting. The original draft was:`,
@@ -40,6 +48,8 @@ export function renderOutcome(a: ActionRecord): string {
       return `Posted ${a.originalBody ? "your edited" : "the"} comment on #${a.prNumber}: ${a.resultUrl ?? a.prUrl}`;
     case "rejected":
       return `Rejected. Nothing was posted on #${a.prNumber}.`;
+    case "superseded":
+      return `This draft was replaced by a newer request. Nothing was posted on #${a.prNumber}.`;
     case "expired":
       return `This request expired. Nothing was posted on #${a.prNumber}.`;
     case "failed":

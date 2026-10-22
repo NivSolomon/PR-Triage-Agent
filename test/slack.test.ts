@@ -10,6 +10,7 @@ import {
   editModal,
   explainSlackError,
   incomingDirectMessage,
+  incomingEditedMention,
   slackActor,
   slackSafe,
 } from "../src/channels/slack.js";
@@ -53,16 +54,23 @@ function setup(
   const api: SlackApi = {
     post: vi.fn(async (channel, text, opts) => {
       posts.push({ channel, text, opts });
-      return `ts${++n}`;
+      return { channel, ts: `ts${++n}` };
     }),
     remove: vi.fn(async (channel, ts) => void removed.push([channel, ts])),
     publishHome: vi.fn(async (userId, blocks) => void homes.push({ userId, blocks })),
     update: vi.fn(async () => undefined),
   };
   const agent = {
-    ask: vi.fn(over.ask ?? (async () => ({ text: "Review #7 first.", proposed: [] as ActionRecord[] }))),
+    ask: vi.fn(over.ask ?? (async () => ({ text: "Review #7 first.", proposed: [] as ActionRecord[], replaced: [] as ActionRecord[] }))),
   };
-  const approvals = over.approvals ?? { approve: vi.fn(), reject: vi.fn(), listPending: vi.fn(() => []) };
+  const approvals = {
+    approve: vi.fn(),
+    reject: vi.fn(),
+    listPending: vi.fn(() => []),
+    rememberCard: vi.fn(),
+    cardsFor: vi.fn((): { channel: string; ts: string }[] => []),
+    ...(over.approvals ?? {}),
+  };
   const github = { repo: "acme/app", listOpenPrs: vi.fn(async () => []), getPr: vi.fn() };
   const budget = {
     summary: vi.fn(() => ({
@@ -114,6 +122,12 @@ describe("approvalBlocks", () => {
     expect(actions.elements.map((e) => e.action_id)).toEqual([APPROVE_ACTION, EDIT_ACTION, REJECT_ACTION]);
     expect(actions.elements.every((e) => e.value === record().id)).toBe(true);
     expect(actions.elements[0]).toHaveProperty("confirm");
+    expect(actions.elements[2]).toHaveProperty("confirm");
+  });
+
+  it("warns the approver when the comment would @-mention someone on GitHub", () => {
+    const all = textOf(approvalBlocks(record({ body: "Please look @octocat" }))).join("\n");
+    expect(all).toMatch(/@-mentions someone/);
   });
 
   it("shows the facts on separate lines and the exact comment in a code block", () => {
@@ -270,6 +284,17 @@ describe("direct messages and mentions", () => {
     expect(s.posts.every((p) => p.channel === "C0TEAM" && p.opts?.threadTs === "111.222")).toBe(true);
     expect(s.posts.map((p) => p.text)).toContain("Review #7 first.");
     expect(s.removed).toEqual([["C0TEAM", "ts1"]]); // the placeholder
+    expect(s.agent.ask).toHaveBeenCalledWith(
+      expect.objectContaining({ conversationId: "slack:C0TEAM:111.222:U0ALICE" }),
+    );
+  });
+
+  it("does not share a channel-thread conversation between two people", async () => {
+    const s = setup({ allowed: ["U0ALICE", "U0BOB"] });
+    await s.channel.handleMessage({ userId: "U0ALICE", channel: "C0TEAM", threadTs: "111.222", text: "<@U0BOT> one" });
+    await s.channel.handleMessage({ userId: "U0BOB", channel: "C0TEAM", threadTs: "111.222", text: "<@U0BOT> two" });
+    const ids = s.agent.ask.mock.calls.map((c) => (c as unknown as [{ conversationId: string }])[0].conversationId);
+    expect(new Set(ids).size).toBe(2);
   });
 
   describe("when every workspace member may chat (SLACK_ALLOW_ALL_MEMBERS)", () => {
@@ -339,11 +364,15 @@ describe("direct messages and mentions", () => {
         allowAll: true,
         teamChannelId: "C0TEAM",
         approvers: ["U0BOSS"],
-        ask: async () => ({ text: "I drafted a comment.", proposed: [proposed] }),
+        ask: async () => ({ text: "I drafted a comment.", proposed: [proposed], replaced: [] }),
       });
       await s.channel.handleMessage({ userId: "U0TESTER", channel: "D0X", text: "leave a comment on #7" });
       const cards = s.posts.filter((p) => p.opts?.blocks);
       expect(cards.map((c) => c.channel).sort()).toEqual(["C0TEAM", "U0BOSS", "U0TESTER"]);
+      expect(s.approvals.rememberCard).toHaveBeenCalledTimes(3);
+      expect(s.approvals.rememberCard).toHaveBeenCalledWith(proposed.id, "C0TEAM", expect.any(String));
+      expect(s.approvals.rememberCard).toHaveBeenCalledWith(proposed.id, "U0BOSS", expect.any(String));
+      expect(s.approvals.rememberCard).toHaveBeenCalledWith(proposed.id, "U0TESTER", expect.any(String));
     });
 
     it("refuses people Slack says belong to another workspace (Slack Connect), but not our own", async () => {
@@ -386,20 +415,42 @@ describe("direct messages and mentions", () => {
     const proposed = record();
     const s = setup({
       approvers: ["U0BOSS", "U0BOSS2"],
-      ask: async () => ({ text: "I drafted a comment.", proposed: [proposed] }),
+      ask: async () => ({ text: "I drafted a comment.", proposed: [proposed], replaced: [] }),
     });
     await s.channel.handleMessage({ userId: "U0ALICE", channel: "D0ALICE", text: "ask sam to fix CI on #7" });
     const cards = s.posts.filter((p) => p.opts?.blocks);
     expect(cards.map((c) => c.channel).sort()).toEqual(["U0BOSS", "U0BOSS2"]);
     expect(s.posts.map((p) => p.text).join("\n")).toMatch(/Nothing is posted until an approver approves it/);
+    expect(s.approvals.rememberCard).toHaveBeenCalled();
+  });
+
+  it("updates stored copies of a replaced card so Approve buttons disappear", async () => {
+    const old = record({ id: "aaaaaaaa-1111-2222-3333-444444444444", status: "superseded" });
+    const next = record({ id: "bbbbbbbb-1111-2222-3333-444444444444", body: "Well Done!" });
+    const s = setup({
+      approvals: {
+        cardsFor: vi.fn((id: string) => (id === old.id ? [{ channel: "U0BOSS", ts: "ts-old" }] : [])),
+        rememberCard: vi.fn(),
+      },
+    });
+    await s.channel.sendApprovalCards(next, [old]);
+    expect(s.api.update).toHaveBeenCalledWith(
+      "U0BOSS",
+      "ts-old",
+      expect.stringMatching(/replaced by a newer request/i),
+      expect.any(Array),
+    );
+    const blocks = (s.api.update as ReturnType<typeof vi.fn>).mock.calls[0]?.[3] as Array<{ type: string }>;
+    expect(blocks.some((b) => b.type === "actions")).toBe(false);
+    expect(s.approvals.rememberCard).toHaveBeenCalledWith(next.id, "U0BOSS", expect.stringMatching(/^ts/));
   });
 
   it("says so, and keeps the request pending, if no approver can be reached", async () => {
-    const s = setup({ ask: async () => ({ text: "Drafted.", proposed: [record()] }) });
+    const s = setup({ ask: async () => ({ text: "Drafted.", proposed: [record()], replaced: [] }) });
     (s.api.post as ReturnType<typeof vi.fn>).mockImplementation(async (channel: string, text: string, opts?: { blocks?: unknown[] }) => {
       if (opts?.blocks) throw new Error("cannot_dm_bot");
       s.posts.push({ channel, text, opts });
-      return "ts";
+      return { channel, ts: "ts" };
     });
     vi.spyOn(console, "error").mockImplementation(() => undefined);
     await s.channel.handleMessage({ userId: "U0ALICE", channel: "D0ALICE", text: "ask sam to fix CI on #7" });
@@ -459,10 +510,73 @@ describe("direct messages and mentions", () => {
     ).toBeNull();
   });
 
+  it("treats an edited @mention in a channel as a new question", () => {
+    const incoming = incomingEditedMention(
+      {
+        channel: "C0TEAM",
+        channel_type: "channel",
+        subtype: "message_changed",
+        message: {
+          user: "U0ALICE",
+          text: "<@U0BOT> leave a comment on #7",
+          ts: "111.222",
+          thread_ts: "111.000",
+        },
+        previous_message: { text: "<@U0BOT> hello" },
+      },
+      "U0BOT",
+    );
+    expect(incoming).toEqual({
+      userId: "U0ALICE",
+      channel: "C0TEAM",
+      threadTs: "111.000",
+      text: "<@U0BOT> leave a comment on #7",
+    });
+  });
+
+  it("ignores channel edits that do not mention the bot, and DMs (those have their own path)", () => {
+    expect(
+      incomingEditedMention(
+        {
+          channel: "C0TEAM",
+          channel_type: "channel",
+          subtype: "message_changed",
+          message: { user: "U0ALICE", text: "no mention here" },
+          previous_message: { text: "old" },
+        },
+        "U0BOT",
+      ),
+    ).toBeNull();
+    expect(
+      incomingEditedMention(
+        {
+          channel: "D0ALICE",
+          channel_type: "im",
+          subtype: "message_changed",
+          message: { user: "U0ALICE", text: "<@U0BOT> hi" },
+          previous_message: { text: "old" },
+        },
+        "U0BOT",
+      ),
+    ).toBeNull();
+    expect(
+      incomingEditedMention(
+        {
+          channel: "C0TEAM",
+          channel_type: "channel",
+          subtype: "message_changed",
+          message: { user: "U0ALICE", text: "<@U0BOT> hi" },
+          previous_message: { text: "old" },
+        },
+        undefined,
+      ),
+    ).toBeNull();
+  });
+
   it("handles one question at a time per person", async () => {
     let release: () => void = () => undefined;
     const gate = new Promise<void>((r) => (release = r));
-    const s = setup({ ask: async () => { await gate; return { text: "done", proposed: [] }; } });
+    const s = setup({ ask: async () => { await gate; return { text: "done", proposed: [], replaced: [] }; } });
     const first = s.channel.handleMessage({ userId: "U0ALICE", channel: "D0ALICE", text: "one" });
     await new Promise((r) => setTimeout(r, 10));
     await s.channel.handleMessage({ userId: "U0ALICE", channel: "D0ALICE", text: "two" });
@@ -535,6 +649,39 @@ describe("button clicks", () => {
       notice: async (t) => void notices.push(t),
     });
     expect(notices.join()).toMatch(/Posted the comment/);
+  });
+
+  it("closes every stored copy of the card, not only the one that was clicked", async () => {
+    const decided = record({ status: "executed", resultUrl: "https://github.com/acme/app/pull/7#c1" });
+    const copies = [
+      { channel: "D0BOSS", ts: "ts-dm" },
+      { channel: "C0TEAM", ts: "ts-ch" },
+    ];
+    const s = setup({
+      approvals: {
+        approve: vi.fn(async () => decided),
+        reject: vi.fn(),
+        listPending: vi.fn(() => []),
+        rememberCard: vi.fn(),
+        cardsFor: vi.fn((id: string) => (id === decided.id ? copies : [])),
+      },
+    });
+    await s.channel.handleDecision({
+      userId: "U0BOSS",
+      kind: "approve",
+      id: decided.id,
+      card: { channel: "C0TEAM", ts: "ts-ch" },
+      finish: async () => undefined,
+      notice: async () => undefined,
+    });
+    expect(s.approvals.rememberCard).toHaveBeenCalledWith(decided.id, "C0TEAM", "ts-ch");
+    const updated = (s.api.update as ReturnType<typeof vi.fn>).mock.calls.map((c) => `${c[0]}/${c[1]}`).sort();
+    expect(updated).toEqual(["C0TEAM/ts-ch", "D0BOSS/ts-dm"]);
+    for (const call of (s.api.update as ReturnType<typeof vi.fn>).mock.calls) {
+      const blocks = call[3] as Array<{ type: string }>;
+      expect(blocks.some((b) => b.type === "actions")).toBe(false);
+      expect(String(call[2])).toMatch(/Posted the comment on #7/);
+    }
   });
 });
 

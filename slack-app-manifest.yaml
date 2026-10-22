@@ -35,11 +35,15 @@ oauth_config:
       - commands            # the /triage command
       - im:history          # read direct messages sent to the app
       - im:write            # open a direct message to deliver approval cards
+      - channels:history    # see edits of @mentions in public channels (Slack does not re-send app_mention)
+      - groups:history      # same for private channels the app is in
 settings:
   event_subscriptions:
     bot_events:
       - app_mention
       - message.im
+      - message.channels    # edited @mentions in public channels
+      - message.groups      # edited @mentions in private channels
       - app_home_opened     # fill the Home tab with the guide when someone opens it
   interactivity:
     is_enabled: true        # the Approve / Reject buttons

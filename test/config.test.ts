@@ -117,6 +117,22 @@ describe("loadConfig", () => {
   it("rejects a malformed repo name", () => {
     expect(() => loadConfig({ GITHUB_REPO: "not-a-repo" })).toThrow(/owner\/repo/);
   });
+
+  it("reads an optional GitHub login on a web user", () => {
+    const c = loadConfig({
+      WEB_USERS: JSON.stringify({ dana: { key: "dana-personal-key-0123", role: "approver", github: "octocat" } }),
+    });
+    expect(c.WEB_USERS).toEqual([{ name: "dana", key: "dana-personal-key-0123", role: "approver", github: "octocat" }]);
+    expect(() =>
+      loadConfig({ WEB_USERS: JSON.stringify({ dana: { key: "dana-personal-key-0123", role: "approver", github: "not a login" } }) }),
+    ).toThrow(/WEB_USERS/);
+  });
+
+  it("refuses AUTH_MAX_FAILURES=0 when TRUST_PROXY is set (a public host must keep the lockout)", () => {
+    expect(() => loadConfig({ TRUST_PROXY: "1", AUTH_MAX_FAILURES: "0" })).toThrow(/AUTH_MAX_FAILURES/);
+    expect(loadConfig({ TRUST_PROXY: "0", AUTH_MAX_FAILURES: "0" }).AUTH_MAX_FAILURES).toBe(0);
+    expect(loadConfig({ TRUST_PROXY: "1" }).AUTH_MAX_FAILURES).toBe(10);
+  });
 });
 
 describe("requireConfig", () => {

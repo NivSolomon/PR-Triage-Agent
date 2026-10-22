@@ -5,7 +5,9 @@ import type { DatabaseSync } from "node:sqlite";
  *   pending -> executing -> executed
  *                        -> failed      (GitHub definitely did not do it; safe to propose again)
  *                        -> uncertain   (no response; we could not confirm either way)
- *   pending -> rejected | expired
+ *   pending -> rejected | expired | superseded | failed
+ *     superseded = the same person asked again on the same PR; the new draft replaced this one.
+ *     failed from pending = the PR was no longer open (or locked) at approval time; nothing posted.
  */
 export type ActionStatus =
   | "pending"
@@ -14,7 +16,8 @@ export type ActionStatus =
   | "failed"
   | "uncertain"
   | "rejected"
-  | "expired";
+  | "expired"
+  | "superseded";
 
 export interface ActionRecord {
   id: string;
@@ -99,6 +102,19 @@ export type NewAction = Pick<
 export class ActionRepository {
   constructor(private readonly db: DatabaseSync) {}
 
+  /** Run several writes as one unit (insert + withdraw older drafts must not leave two pending rows). */
+  runInTransaction<T>(fn: () => T): T {
+    this.db.exec("BEGIN");
+    try {
+      const out = fn();
+      this.db.exec("COMMIT");
+      return out;
+    } catch (err) {
+      this.db.exec("ROLLBACK");
+      throw err;
+    }
+  }
+
   insert(a: NewAction): void {
     this.db
       .prepare(
@@ -160,6 +176,31 @@ export class ActionRepository {
     return Number(res.changes) === 1;
   }
 
+  /**
+   * Withdraw every still-pending comment this person has on this PR, except `keepId`.
+   * Used when they ask again with new wording so an approver cannot post the old draft.
+   */
+  supersedeOpen(requestedBy: string, prNumber: number, keepId: string, nowIso: string, note: string): ActionRecord[] {
+    const open = this.list(["pending"]).filter(
+      (a) => a.requestedBy === requestedBy && a.prNumber === prNumber && a.id !== keepId,
+    );
+    const kept: ActionRecord[] = [];
+    for (const a of open) {
+      const res = this.db
+        .prepare(
+          `UPDATE pending_actions
+              SET status = 'superseded', decided_by = ?, decided_at = ?, error = ?
+            WHERE id = ? AND status = 'pending'`,
+        )
+        .run(requestedBy, nowIso, note, a.id);
+      if (Number(res.changes) === 1) {
+        const row = this.get(a.id);
+        if (row) kept.push(row);
+      }
+    }
+    return kept;
+  }
+
   reject(id: string, by: string, nowIso: string): boolean {
     const res = this.db
       .prepare(
@@ -171,15 +212,37 @@ export class ActionRepository {
     return Number(res.changes) === 1;
   }
 
-  /** Mark every pending action past its expiry. Returns how many changed. */
-  expireOverdue(nowIso: string): number {
+  /**
+   * Mark a still-pending request as failed without posting (PR closed/locked).
+   * Returns false if it was no longer pending, so a concurrent claim can finish its own path.
+   */
+  failIfPending(id: string, error: string): boolean {
     const res = this.db
+      .prepare(
+        `UPDATE pending_actions SET status = 'failed', error = ?
+          WHERE id = ? AND status = 'pending'`,
+      )
+      .run(error, id);
+    return Number(res.changes) === 1;
+  }
+
+  /** Mark every pending action past its expiry. Returns the rows that just expired. */
+  expireOverdue(nowIso: string): ActionRecord[] {
+    const due = (
+      this.db
+        .prepare(
+          `SELECT * FROM pending_actions WHERE status = 'pending' AND expires_at <= ?`,
+        )
+        .all(nowIso) as unknown as Row[]
+    ).map(toRecord);
+    if (due.length === 0) return [];
+    this.db
       .prepare(
         `UPDATE pending_actions SET status = 'expired'
           WHERE status = 'pending' AND expires_at <= ?`,
       )
       .run(nowIso);
-    return Number(res.changes);
+    return due.map((a) => ({ ...a, status: "expired" as const }));
   }
 
   finish(
@@ -190,5 +253,18 @@ export class ActionRepository {
     this.db
       .prepare(`UPDATE pending_actions SET status = ?, result_url = ?, error = ? WHERE id = ?`)
       .run(status, detail.resultUrl ?? null, detail.error ?? null, id);
+  }
+
+  /** Remember a Slack message that showed Approve buttons for this request. */
+  rememberCard(actionId: string, channel: string, ts: string): void {
+    this.db
+      .prepare(`INSERT OR IGNORE INTO action_cards (action_id, channel, ts) VALUES (?, ?, ?)`)
+      .run(actionId, channel, ts);
+  }
+
+  cardsFor(actionId: string): { channel: string; ts: string }[] {
+    return this.db
+      .prepare(`SELECT channel, ts FROM action_cards WHERE action_id = ?`)
+      .all(actionId) as { channel: string; ts: string }[];
   }
 }

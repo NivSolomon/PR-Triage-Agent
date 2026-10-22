@@ -36,7 +36,7 @@ const pr = (over: Record<string, unknown> = {}) => ({
 });
 
 const client = (routes: Record<string, Route>) =>
-  new GitHubClient({ token: "t", repo: "acme/app", fetchImpl: fakeFetch(routes) });
+  new GitHubClient({ token: "t", repo: "acme/app", fetchImpl: fakeFetch(routes), sleep: async () => undefined });
 
 describe("listOpenPrs", () => {
   it("normalises pull requests and keeps the source url", async () => {
@@ -297,6 +297,30 @@ describe("error handling", () => {
     );
   });
 
+  it("retries a GET once after a rate-limit response, and never retries a comment POST", async () => {
+    let gets = 0;
+    const retried = new GitHubClient({
+      token: "t",
+      repo: "acme/app",
+      sleep: async () => undefined,
+      fetchImpl: (async (input: string | URL | Request) => {
+        const url = String(input);
+        if (url.includes("/pulls?state=open")) {
+          gets += 1;
+          if (gets === 1) return new Response("{}", { status: 429, headers: { "retry-after": "0" } });
+          return new Response("[]", { status: 200, headers: { "content-type": "application/json" } });
+        }
+        if (url.includes("/comments")) {
+          return new Response("{}", { status: 429, headers: { "retry-after": "0" } });
+        }
+        return new Response("not routed", { status: 500 });
+      }) as typeof fetch,
+    });
+    await expect(retried.listOpenPrs()).resolves.toEqual([]);
+    expect(gets).toBe(2);
+    await expect(retried.postComment(7, "hi")).rejects.toThrow(/rate limit|HTTP 429/);
+  });
+
   it("wraps network failures", async () => {
     const failing = new GitHubClient({
       token: "t",
@@ -369,6 +393,14 @@ describe("writes", () => {
   it("getPrSummary makes a single lightweight lookup", async () => {
     const s = await client({ "/pulls/7": pr() }).getPrSummary(7);
     expect(s.title).toBe("Fix login");
+    expect(s.state).toBe("open");
+    expect(s.locked).toBe(false);
+  });
+
+  it("getPrSummary reports a closed or locked pull request", async () => {
+    const closed = await client({ "/pulls/7": pr({ state: "closed", locked: true }) }).getPrSummary(7);
+    expect(closed.state).toBe("closed");
+    expect(closed.locked).toBe(true);
   });
 
   it("classifies ambiguous failures (no response / 5xx) separately from definite ones (4xx)", () => {
@@ -438,6 +470,40 @@ describe("getPr: lists GitHub splits into pages", () => {
     expect(states.get("late")).toBe("CHANGES_REQUESTED");
     expect(states.get("u1")).toBe("APPROVED");
     expect(detail.reviews).toHaveLength(101);
+  });
+
+  it("reads the newest conversation comments, not the first 100 oldest", async () => {
+    const oldest = many(100, (i) => ({
+      user: { login: "old" },
+      created_at: "2026-10-01T00:00:00Z",
+      body: `old-${i}`,
+    }));
+    const newest = many(5, (i) => ({
+      user: { login: "new" },
+      created_at: "2026-10-20T00:00:00Z",
+      body: `new-${i}`,
+    }));
+    const detail = await client({
+      "/issues/7/comments?per_page=100&page=2": newest,
+      "/issues/7/comments": oldest,
+      "/pulls/7/reviews": [],
+      "/pulls/7/files": [],
+      "/issues/7/events": [],
+      "/check-runs": { total_count: 0, check_runs: [] },
+      "/commits/abc123/status": { statuses: [] },
+      "/pulls/7": pr({ additions: 1, deletions: 1, changed_files: 1, mergeable_state: "clean", comments: 105 }),
+    }).getPr(7);
+    expect(detail.recentComments.map((c) => c.body)).toEqual([
+      "old-97",
+      "old-98",
+      "old-99",
+      "new-0",
+      "new-1",
+      "new-2",
+      "new-3",
+      "new-4",
+    ]);
+    expect(detail.recentComments[0]?.body).not.toBe("old-0");
   });
 
   it("fails loudly, instead of ranking on stale reviews, when there are more reviews than it will read", async () => {

@@ -58,6 +58,22 @@ const MIGRATIONS: string[] = [
      text        TEXT NOT NULL DEFAULT ''
    );
    CREATE INDEX idx_runs_task ON scheduler_runs(task, id);`,
+  // Every Slack message that showed Approve buttons for a request, so we can replace those
+  // buttons after it is decided, replaced, or expires (otherwise stale cards stay clickable).
+  `CREATE TABLE action_cards (
+     action_id TEXT NOT NULL,
+     channel   TEXT NOT NULL,
+     ts        TEXT NOT NULL,
+     PRIMARY KEY (action_id, channel, ts)
+   );
+   CREATE INDEX idx_action_cards_action ON action_cards(action_id);`,
+  // Web sessions on disk so a deploy or crash does not sign everyone out.
+  `CREATE TABLE web_sessions (
+     id             TEXT PRIMARY KEY,
+     principal_json TEXT NOT NULL,
+     created_at     INTEGER NOT NULL,
+     last_seen      INTEGER NOT NULL
+   );`,
 ];
 
 export function openDatabase(path: string): DatabaseSync {

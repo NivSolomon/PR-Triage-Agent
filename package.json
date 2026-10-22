@@ -13,7 +13,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "evals": "vitest run --config vitest.evals.config.ts"
+    "evals": "vitest run --config vitest.evals.config.ts",
+    "evals:once": "tsx --env-file-if-exists=.env evals/once.ts"
   },
   "license": "MIT",
   "dependencies": {

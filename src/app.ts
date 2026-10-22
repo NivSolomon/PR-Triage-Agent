@@ -64,10 +64,12 @@ export function createApp(config: Config): App {
     pricePerMOutput: config.LLM_PRICE_OUTPUT_PER_M,
     dailyRequestsPerActor: config.DAILY_REQUESTS_PER_USER,
   });
+  const slackRef: { current?: SlackChannel } = {};
   const approvals = new ApprovalService({
     github,
     repo: new ActionRepository(db),
     isApprover: makeIsApprover(config),
+    onRetired: (records) => slackRef.current?.retireCards(records) ?? Promise.resolve(),
   });
 
   // Late-bound: the agent needs a way to alert the team, the channel needs the agent.
@@ -92,6 +94,7 @@ export function createApp(config: Config): App {
     github,
     budget,
   });
+  slackRef.current = slack;
   notify = (text) => slack.notifyApprovers(text);
 
   /** Where scheduled messages go: the digest channel if set, otherwise every approver (as a DM). */
@@ -115,6 +118,7 @@ export function createApp(config: Config): App {
       runs,
     },
     users: config.WEB_USERS,
+    sessionDb: db,
     trustProxy: config.TRUST_PROXY,
     maxFailures: config.AUTH_MAX_FAILURES,
     accessKey: config.WEB_ACCESS_KEY,
@@ -125,7 +129,7 @@ export function createApp(config: Config): App {
     github,
     budget,
     // A request made on the web page must reach the Slack approvers too.
-    onProposed: async (record) => void (await slack.sendApprovalCards(record)),
+    onProposed: async (record, replaced) => void (await slack.sendApprovalCards(record, replaced)),
     mount: (expressApp) =>
       expressApp.use(
         "/mcp",
@@ -134,7 +138,7 @@ export function createApp(config: Config): App {
           maxFailures: config.AUTH_MAX_FAILURES,
           agent,
           tools: { github, approvals },
-          onProposed: async (record) => void (await slack.sendApprovalCards(record)),
+          onProposed: async (record, replaced) => void (await slack.sendApprovalCards(record, replaced)),
         }),
       ),
     // A decision made on the web page: tell the Slack user who asked.
@@ -163,6 +167,10 @@ export function createApp(config: Config): App {
       });
       console.log(`Web interface on port ${config.PORT}`);
       await slack.start();
+      const recovered = await approvals.recoverInterrupted();
+      if (recovered.length > 0) {
+        console.log(`Reconciled ${recovered.length} interrupted approval(s) after restart`);
+      }
     },
     async stop() {
       schedule?.stop();

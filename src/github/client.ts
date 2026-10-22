@@ -24,6 +24,8 @@ export interface GitHubClientOptions {
   /** Injectable for tests. Defaults to the global fetch. */
   fetchImpl?: typeof fetch;
   baseUrl?: string;
+  /** Injectable wait used by GET rate-limit retries. */
+  sleep?: (ms: number) => Promise<void>;
 }
 
 const MAX_TEXT = 600;
@@ -51,6 +53,8 @@ const rawPrListItem = z.object({
   requested_reviewers: z.array(z.object({ login: z.string() })).default([]),
   base: z.object({ ref: z.string() }),
   head: z.object({ sha: z.string(), ref: z.string() }),
+  state: z.string().optional(),
+  locked: z.boolean().optional(),
 });
 
 const rawPr = rawPrListItem.extend({
@@ -177,10 +181,12 @@ const PASSING = new Set(["success", "neutral", "skipped"]);
 export class GitHubClient {
   private readonly fetchImpl: typeof fetch;
   private readonly baseUrl: string;
+  private readonly sleep: (ms: number) => Promise<void>;
 
   constructor(private readonly options: GitHubClientOptions) {
     this.fetchImpl = options.fetchImpl ?? fetch;
     this.baseUrl = options.baseUrl ?? "https://api.github.com";
+    this.sleep = options.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
   }
 
   get repo(): string {
@@ -213,7 +219,7 @@ export class GitHubClient {
     const [checks, reviews, comments, readySince] = await Promise.all([
       this.getChecks(pr.head.sha, number),
       this.getReviews(number),
-      this.getComments(number),
+      this.getComments(number, pr.comments),
       this.getReadySince(number, pr.created_at),
     ]);
     const reviewableLines = await this.getReviewableLines(number);
@@ -254,15 +260,18 @@ export class GitHubClient {
     marker: string,
     since: string,
   ): Promise<PostedComment | null> {
-    const raw = z
-      .array(rawPostedComment.extend({ body: z.string().nullable().optional() }))
-      .parse(
+    const schema = z.array(rawPostedComment.extend({ body: z.string().nullable().optional() }));
+    for (let page = 1; page <= MAX_PAGES; page += 1) {
+      const raw = schema.parse(
         await this.get(
-          `/issues/${number}/comments?since=${encodeURIComponent(since)}&per_page=100`,
+          `/issues/${number}/comments?since=${encodeURIComponent(since)}&per_page=100&page=${page}`,
         ),
       );
-    const hit = raw.find((c) => (c.body ?? "").includes(marker));
-    return hit ? { id: hit.id, url: hit.html_url } : null;
+      const hit = raw.find((c) => (c.body ?? "").includes(marker));
+      if (hit) return { id: hit.id, url: hit.html_url };
+      if (raw.length < 100) break;
+    }
+    return null;
   }
 
   // --- helpers ---
@@ -281,6 +290,8 @@ export class GitHubClient {
       headBranch: truncate(p.head.ref, 200),
       headSha: p.head.sha,
       sourceUrl: p.html_url,
+      state: p.state === "closed" ? "closed" : "open",
+      locked: p.locked === true,
     };
   }
 
@@ -423,8 +434,19 @@ export class GitHubClient {
     return [...latest.values()];
   }
 
-  private async getComments(number: number): Promise<{ recent: CommentSummary[] }> {
-    const raw = rawComments.parse(await this.get(`/issues/${number}/comments?per_page=100`));
+  /**
+   * Newest conversation comments. GitHub returns issue comments oldest-first with no sort,
+   * so we ask for the last page (from the PR's comment count) instead of the first 100.
+   */
+  private async getComments(number: number, commentCount = 0): Promise<{ recent: CommentSummary[] }> {
+    const perPage = 100;
+    const lastPage = Math.max(1, Math.ceil(Math.max(commentCount, 1) / perPage));
+    const load = async (page: number) =>
+      rawComments.parse(await this.get(`/issues/${number}/comments?per_page=${perPage}&page=${page}`));
+    let raw = await load(lastPage);
+    if (raw.length < MAX_COMMENTS && lastPage > 1) {
+      raw = [...(await load(lastPage - 1)), ...raw];
+    }
     const recent = raw.slice(-MAX_COMMENTS).map((c) => ({
       author: c.user?.login ?? "unknown",
       createdAt: c.created_at,
@@ -459,11 +481,14 @@ export class GitHubClient {
     return this.request("GET", path);
   }
 
+  private isRateLimited(res: Response): boolean {
+    return res.status === 429 || (res.status === 403 && res.headers.get("x-ratelimit-remaining") === "0");
+  }
+
   private async request(method: "GET" | "POST", path: string, body?: unknown): Promise<unknown> {
     const url = `${this.baseUrl}/repos/${this.options.repo}${path}`;
-    let res: Response;
-    try {
-      res = await this.fetchImpl(url, {
+    const send = () =>
+      this.fetchImpl(url, {
         method,
         headers: {
           Authorization: `Bearer ${this.options.token}`,
@@ -475,9 +500,23 @@ export class GitHubClient {
         body: body === undefined ? undefined : JSON.stringify(body),
         signal: AbortSignal.timeout(15_000),
       });
+    let res: Response;
+    try {
+      res = await send();
     } catch (err) {
       // No HTTP status: we do not know whether GitHub received the request.
       throw new GitHubError(`Could not reach GitHub: ${(err as Error).message}`);
+    }
+    // Reads only: a comment POST must never be retried, or GitHub might receive it twice.
+    if (!res.ok && method === "GET" && this.isRateLimited(res)) {
+      const retryAfter = Number(res.headers.get("retry-after"));
+      const waitMs = Number.isFinite(retryAfter) && retryAfter >= 0 ? Math.min(retryAfter * 1000, 2000) : 250;
+      await this.sleep(waitMs);
+      try {
+        res = await send();
+      } catch (err) {
+        throw new GitHubError(`Could not reach GitHub: ${(err as Error).message}`);
+      }
     }
     if (!res.ok) throw this.toError(res);
     return res.json();
@@ -491,13 +530,11 @@ export class GitHubClient {
       );
     }
     if (res.status === 401) return new GitHubError("GitHub rejected the token (401).", 401);
-    if (res.status === 403 || res.status === 429) {
-      const remaining = res.headers.get("x-ratelimit-remaining");
-      const msg =
-        remaining === "0"
-          ? "GitHub rate limit reached. Try again later."
-          : "GitHub refused the request (403). The token may lack permission.";
-      return new GitHubError(msg, res.status);
+    if (res.status === 429 || (res.status === 403 && res.headers.get("x-ratelimit-remaining") === "0")) {
+      return new GitHubError("GitHub rate limit reached. Try again later.", res.status);
+    }
+    if (res.status === 403) {
+      return new GitHubError("GitHub refused the request (403). The token may lack permission.", 403);
     }
     return new GitHubError(`GitHub returned HTTP ${res.status}.`, res.status);
   }

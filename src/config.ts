@@ -24,7 +24,7 @@ const slackGithubMap = csv
   )
   .transform((pairs) => Object.fromEntries(pairs.map((p) => p.split(":") as [string, string])));
 
-/** WEB_USERS: {"dana":{"key":"<16+ chars>","role":"approver"},"lee":{"key":"...","role":"reader"}} */
+/** WEB_USERS: {"dana":{"key":"<16+ chars>","role":"approver","github":"octocat"},"lee":{"key":"...","role":"reader"}} */
 const webUsers = z
   .string()
   .default("{}")
@@ -33,10 +33,25 @@ const webUsers = z
       const parsed = z
         .record(
           z.string().regex(/^[a-z0-9][a-z0-9._-]{0,31}$/, "name: lowercase letters, digits, . _ - (max 32)"),
-          z.object({ key: z.string().min(16, "key too short"), role: z.enum(["reader", "approver"]) }).strict(),
+          z
+            .object({
+              key: z.string().min(16, "key too short"),
+              role: z.enum(["reader", "approver"]),
+              /** GitHub login, so the web queue can group "waiting for your review" like Slack. */
+              github: z
+                .string()
+                .regex(/^[A-Za-z0-9][A-Za-z0-9-]{0,38}$/, "must be a GitHub login")
+                .optional(),
+            })
+            .strict(),
         )
         .parse(JSON.parse(s));
-      const users = Object.entries(parsed).map(([name, u]) => ({ name, key: u.key, role: u.role }));
+      const users = Object.entries(parsed).map(([name, u]) => ({
+        name,
+        key: u.key,
+        role: u.role,
+        ...(u.github ? { github: u.github } : {}),
+      }));
       if (new Set(users.map((u) => u.key)).size !== users.length) throw new Error("duplicate key");
       return users;
     } catch {
@@ -137,6 +152,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     Object.entries(env).filter(([, v]) => v !== undefined && v.trim() !== ""),
   );
   const result = schema.safeParse(present);
+  if (result.success && result.data.TRUST_PROXY > 0 && result.data.AUTH_MAX_FAILURES === 0) {
+    throw new Error(
+      "Invalid configuration:\n  - AUTH_MAX_FAILURES: cannot be 0 when TRUST_PROXY is set (a public host must keep the lockout on).",
+    );
+  }
   if (!result.success) {
     const details = result.error.issues
       .map((i) => `  - ${i.path.join(".")}: ${i.message}`)

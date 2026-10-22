@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import type { DatabaseSync } from "node:sqlite";
 import express from "express";
 import type { NextFunction, Request, Response } from "express";
 import { z } from "zod";
@@ -7,6 +8,7 @@ import type { ApprovalService } from "../approvals/service.js";
 import type { Agent } from "../agent/agent.js";
 import type { BudgetService } from "../budget/service.js";
 import { decide, renderQueue } from "../channels/shared.js";
+import { personalView } from "../triage/personal.js";
 import { buildGuide } from "../guide.js";
 import type { DecisionResult } from "../channels/shared.js";
 import type { GitHubClient } from "../github/client.js";
@@ -50,6 +52,7 @@ export interface WebUser {
   name: string;
   key: string;
   role: WebRole;
+  github?: string;
 }
 
 export interface WebDeps {
@@ -66,12 +69,14 @@ export interface WebDeps {
   maxFailures?: number;
   /** Sessions, injectable for tests. */
   sessions?: SessionStore;
+  /** When set (and `sessions` is not), sessions are stored in SQLite so a restart keeps people signed in. */
+  sessionDb?: DatabaseSync;
   agent: Agent;
   approvals: ApprovalService;
   github: Pick<GitHubClient, "listOpenPrs" | "getPr" | "repo">;
   budget: BudgetService;
   /** A request created from the web page: lets Slack approvers get the card too. */
-  onProposed?: (record: ActionRecord) => Promise<void> | void;
+  onProposed?: (record: ActionRecord, replaced?: ActionRecord[]) => Promise<void> | void;
   /** A decision taken on the web page: lets the requester be told. */
   onDecided?: (result: DecisionResult) => Promise<void> | void;
   /** Mount extra routes (the MCP endpoint) before the final error handler. */
@@ -115,7 +120,15 @@ export function createWebApp(deps: WebDeps): express.Express {
 
   // Everything that can sign in: each person's own key, plus the two shared keys if they are configured.
   const credentials: Array<{ key: string; principal: Principal }> = [
-    ...(deps.users ?? []).map((u) => ({ key: u.key, principal: { name: u.name, role: u.role, actor: `web:${u.name}` } })),
+    ...(deps.users ?? []).map((u) => ({
+      key: u.key,
+      principal: {
+        name: u.name,
+        role: u.role,
+        actor: `web:${u.name}`,
+        ...(u.github ? { githubLogin: u.github } : {}),
+      },
+    })),
     ...(deps.approverKey
       ? [{ key: deps.approverKey, principal: { name: "shared approver key", role: "approver" as const, actor: deps.approverActor } }]
       : []),
@@ -137,7 +150,7 @@ export function createWebApp(deps: WebDeps): express.Express {
     for (const c of credentials) if (sameSecret(given, c.key)) found = c.principal;
     return found;
   };
-  const sessions = deps.sessions ?? new SessionStore();
+  const sessions = deps.sessions ?? new SessionStore({ db: deps.sessionDb });
 
   const app = express();
   app.disable("x-powered-by");
@@ -178,13 +191,13 @@ export function createWebApp(deps: WebDeps): express.Express {
       return;
     }
     const ip = req.ip ?? "unknown";
-    if (throttle.blocked(ip)) {
-      res.status(429).json({ error: "Too many failed attempts. Try again in a few minutes." });
-      return;
-    }
     const parsed = loginBody.safeParse(req.body);
     const principal = parsed.success ? identify(parsed.data.key) : null;
     if (!principal) {
+      if (throttle.blocked(ip)) {
+        res.status(429).json({ error: "Too many failed attempts. Try again in a few minutes." });
+        return;
+      }
       throttle.fail(ip);
       res.status(401).json({ error: "Wrong key." });
       return;
@@ -214,10 +227,6 @@ export function createWebApp(deps: WebDeps): express.Express {
       return;
     }
     const ip = req.ip ?? "unknown";
-    if (throttle.blocked(ip)) {
-      res.status(429).json({ error: "Too many failed attempts. Try again in a few minutes." });
-      return;
-    }
 
     // Programs (and tests) may send the key as a Bearer header; the page uses its session cookie.
     const key = bearerToken(req.header("authorization"));
@@ -233,7 +242,12 @@ export function createWebApp(deps: WebDeps): express.Express {
       }
     }
     if (!principal) {
-      // Only a wrong key counts against the lockout. Opening the page without a session is not an attack.
+      // Only a wrong key counts against the lockout. A valid session or key is never locked out:
+      // testers on a shared office IP must still be able to use the page after someone else's typos.
+      if (throttle.blocked(ip)) {
+        res.status(429).json({ error: "Too many failed attempts. Try again in a few minutes." });
+        return;
+      }
       if (key) throttle.fail(ip);
       res.status(401).json({ error: key ? "Wrong key." : "Not signed in." });
       return;
@@ -266,7 +280,7 @@ export function createWebApp(deps: WebDeps): express.Express {
 
   api.get("/me", (_req, res) => {
     const p = res.locals.principal as Principal;
-    res.json({ role: p.role, name: p.name, repo: deps.github.repo });
+    res.json({ role: p.role, name: p.name, repo: deps.github.repo, githubLogin: p.githubLogin ?? null });
   });
 
   // What this key may and may not do. Written for the caller's role, from the same source as Slack's help.
@@ -277,9 +291,11 @@ export function createWebApp(deps: WebDeps): express.Express {
   // One shared copy of the queue. Simultaneous requests wait for the same GitHub round trip.
   let queueCache: { at: number; value: QueueResult } | undefined;
   let queueInflight: Promise<QueueResult> | undefined;
-  const sharedQueue = (force: boolean): Promise<QueueResult> => {
+  const sharedQueue = async (force: boolean): Promise<{ queue: QueueResult; cached: boolean }> => {
     const age = queueCache ? Date.now() - queueCache.at : Number.POSITIVE_INFINITY;
-    if (queueCache && age < (force ? QUEUE_MIN_REFRESH_MS : QUEUE_TTL_MS)) return Promise.resolve(queueCache.value);
+    if (queueCache && age < (force ? QUEUE_MIN_REFRESH_MS : QUEUE_TTL_MS)) {
+      return { queue: queueCache.value, cached: true };
+    }
     queueInflight ??= buildQueue(deps.github)
       .then((value) => {
         queueCache = { at: Date.now(), value };
@@ -288,12 +304,18 @@ export function createWebApp(deps: WebDeps): express.Express {
       .finally(() => {
         queueInflight = undefined;
       });
-    return queueInflight;
+    return { queue: await queueInflight, cached: false };
   };
 
   api.get("/queue", async (req, res) => {
     const q = await sharedQueue(req.query.refresh === "1");
-    res.json({ queue: q, text: renderQueue(q) });
+    const login = (res.locals.principal as Principal).githubLogin;
+    res.json({
+      queue: q.queue,
+      text: renderQueue(q.queue, login ? { login } : undefined),
+      cached: q.cached,
+      you: login ? personalView(q.queue.items, login) : null,
+    });
   });
 
   api.get("/budget", (_req, res) => void res.json(deps.budget.summary()));
@@ -336,10 +358,12 @@ export function createWebApp(deps: WebDeps): express.Express {
       actor: principal.actor,
       via: "web",
       canPropose: true,
+      githubLogin: principal.githubLogin,
     });
     for (const record of result.proposed) {
       try {
-        await deps.onProposed?.(record);
+        const mine = result.replaced.filter((a) => a.prNumber === record.prNumber);
+        await deps.onProposed?.(record, mine);
       } catch (err) {
         console.error("Could not forward the approval request:", err instanceof Error ? err.message : err);
       }

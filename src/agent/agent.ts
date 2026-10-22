@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { BudgetService, renderBudgetAlert } from "../budget/service.js";
 import type { ActionRecord } from "../store/actions.js";
 import type { ChatMessage, LlmPort, ToolCall } from "./llm.js";
-import { checkGrounding, numbersInToolOutput } from "./grounding.js";
+import { checkGrounding, notFoundNumbers, numbersInToolOutput, stripNotFoundPrUrls } from "./grounding.js";
 import { toPlainText } from "./plain.js";
 import { t } from "../i18n/catalog.js";
 import { resolveLocale } from "../i18n/locale.js";
@@ -39,6 +39,8 @@ export interface AskResult {
   text: string;
   /** Actions proposed during this request. The channel must show an approval card for each. */
   proposed: ActionRecord[];
+  /** Older pending drafts this person replaced on the same PR. They can no longer be approved. */
+  replaced: ActionRecord[];
   /** Why no model call was made, if so. */
   refusedBecause?: "monthly_budget" | "daily_limit" | "too_long" | "model_unavailable";
 }
@@ -67,6 +69,7 @@ export class Agent {
       return {
         text: t(locale, "agent.tooLong", { length: text.length, limit: MAX_INPUT_CHARS }),
         proposed: [],
+        replaced: [],
         refusedBecause: "too_long",
       };
     }
@@ -80,6 +83,7 @@ export class Agent {
             ? t(locale, "agent.daily", { n: gate.message.match(/\d+/)?.[0] ?? "" })
             : t(locale, "agent.budget"),
         proposed: [],
+        replaced: [],
         refusedBecause: gate.reason as "monthly_budget" | "daily_limit",
       };
     }
@@ -88,12 +92,21 @@ export class Agent {
     const limits = economy ? LIMITS.economy : LIMITS.normal;
     const requestId = randomUUID();
     const proposed: ActionRecord[] = [];
+    const replaced: ActionRecord[] = [];
+    const fetched = new Set<number>();
+    const missing = new Set<number>();
     const ctx: ToolContext = {
       actor: input.actor,
       via: input.via,
       canPropose: input.canPropose,
       githubLogin: input.githubLogin,
-      onProposed: (a) => proposed.push(a),
+      fetchedPrs: fetched,
+      userText: text,
+      requireCommentIntent: true,
+      onProposed: (a, withdrawn) => {
+        proposed.push(a);
+        if (withdrawn) for (const w of withdrawn) replaced.push(w);
+      },
     };
     const specs = toolsFor(ctx);
 
@@ -105,7 +118,6 @@ export class Agent {
     ];
 
     let answer: string | null = null;
-    const fetched = new Set<number>();
     try {
       for (let round = 1; round <= limits.rounds && answer === null; round += 1) {
         const lastRound = round === limits.rounds;
@@ -133,6 +145,7 @@ export class Agent {
         for (const call of res.toolCalls) {
           const output = await this.runCall(call, ctx);
           for (const n of numbersInToolOutput(output)) fetched.add(n);
+          for (const n of notFoundNumbers(output)) missing.add(n);
           messages.push({ role: "tool", toolCallId: call.id, content: output });
         }
       }
@@ -141,6 +154,7 @@ export class Agent {
       return {
         text: t(locale, "agent.modelDown"),
         proposed,
+        replaced,
         refusedBecause: "model_unavailable",
       };
     }
@@ -153,10 +167,10 @@ export class Agent {
       // The signal to watch in production: a rising count means the model is drifting.
       console.warn(`[grounding] request ${requestId} mentioned PR numbers not in fetched data: ${grounding.ungrounded.join(",")}`);
     }
-    const finalText = grounding.text;
+    const finalText = stripNotFoundPrUrls(grounding.text, missing);
     this.remember(input.conversationId, text, finalText);
     await this.maybeAlert();
-    return { text: finalText, proposed };
+    return { text: finalText, proposed, replaced };
   }
 
   private runCall(call: ToolCall, ctx: ToolContext): Promise<string> {

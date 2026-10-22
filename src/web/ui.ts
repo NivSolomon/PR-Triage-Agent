@@ -3,7 +3,9 @@
  * Security rule for the script: untrusted text (PR titles, comments, model output) is only ever
  * written with textContent, never innerHTML, so it cannot inject markup. The JS avoids backticks,
  * template placeholders and backslashes on purpose because it lives inside a TypeScript template string.
+ * Catalog JSON is interpolated once at load time (not by the browser script).
  */
+import { EN, HE } from "../i18n/catalog.js";
 
 export const INDEX_HTML = `<!doctype html>
 <html lang="en">
@@ -108,6 +110,8 @@ export const INDEX_HTML = `<!doctype html>
   button.small { font-size: 12px; padding: 4px 10px; }
 
   /* PR card: colour strip by state, compact header, details revealed on toggle */
+  .q-sec { font-size: 12px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; margin: 14px 0 8px; }
+  .q-sec:first-child { margin-top: 2px; }
   .pr { --tone: var(--neutral); border: 1px solid var(--line); border-left: 4px solid var(--tone); border-radius: 12px; margin-bottom: 10px; background: var(--panel); overflow: hidden; transition: box-shadow .15s, border-color .15s; }
   .pr.t-ok { --tone: var(--ok); }
   .pr.t-warn { --tone: var(--warn); }
@@ -254,6 +258,11 @@ export const INDEX_HTML = `<!doctype html>
   .backdrop { display: none; position: fixed; inset: 0; z-index: 25; background: transparent; }
   .backdrop.open { display: block; }
   @media (max-width: 960px) { .backdrop.open { background: rgba(15,23,42,.45); } }
+  html[dir="rtl"] .fab { right: auto; left: 22px; }
+  html[dir="rtl"] .drawer { right: auto; left: 0; border-left: 0; border-right: 1px solid var(--line); box-shadow: 10px 0 30px rgba(15,23,42,.18); transform: translateX(-105%); }
+  html[dir="rtl"] .drawer.open { transform: none; }
+  html[dir="rtl"] .pr { border-left-width: 1px; border-right: 4px solid var(--tone); }
+  html[dir="rtl"] .rich ul, html[dir="rtl"] .rich ol, html[dir="rtl"] .guide-sec ul { padding-left: 0; padding-right: 20px; }
   #chat { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; padding: 2px; }
   .chat-empty { margin: auto; text-align: center; color: var(--muted); font-size: 14px; padding: 12px; }
   .chat-empty b { display: block; color: var(--fg); font-size: 16px; margin-bottom: 4px; }
@@ -293,6 +302,8 @@ export const INDEX_HTML = `<!doctype html>
   .suggest button { font-size: 12px; padding: 4px 10px; border-radius: 999px; background: var(--accent-soft); border-color: transparent; color: var(--accent); }
   .composer { display: flex; gap: 8px; align-items: flex-end; margin-top: 10px; }
   .composer textarea { flex: 1; }
+  .composer-meta { display: flex; justify-content: space-between; gap: 12px; margin-top: 6px; }
+  #textCount.warn { color: var(--warn); font-weight: 600; }
 
   /* approvals */
   .tabs { display: flex; gap: 4px; padding: 3px; border-radius: 10px; background: var(--soft); width: fit-content; margin-bottom: 12px; }
@@ -361,9 +372,10 @@ export const INDEX_HTML = `<!doctype html>
 
 <header class="bar">
   <div class="bar-in">
-    <div class="brand"><span class="logo" data-icon="pr"></span> PR Triage Agent</div>
+    <div class="brand"><span class="logo" data-icon="pr"></span> <span data-i18n="brand">PR Triage Agent</span></div>
     <span class="muted" id="repo"></span>
     <span class="spacer"></span>
+    <button class="ghost" id="lang" title="Language">עב</button>
     <button class="ghost" id="theme" title="Switch between light and dark">Dark mode</button>
     <div id="userbar" class="hidden" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
       <span class="budget" id="budget"></span>
@@ -377,16 +389,16 @@ export const INDEX_HTML = `<!doctype html>
 <div id="login">
   <div class="panel login-card">
     <div class="logo big" data-icon="pr"></div>
-    <h1>PR Triage Agent</h1>
-    <div class="muted">Know which pull request to review next, and why.</div>
+    <h1 data-i18n="brand">PR Triage Agent</h1>
+    <div class="muted" data-i18n="tagline">Know which pull request to review next, and why.</div>
     <ul class="features">
-      <li><span class="fi" data-icon="github"></span><span><b>Live GitHub data</b> Answers come from your repository, never from memory.</span></li>
-      <li><span class="fi" data-icon="trend"></span><span><b>Explainable ranking</b> Every score shows the signals behind it.</span></li>
-      <li><span class="fi" data-icon="shield"></span><span><b>Human in the loop</b> A comment is only posted after an approver says yes.</span></li>
+      <li><span class="fi" data-icon="github"></span><span><b data-i18n="feat.live">Live GitHub data</b> <span data-i18n="feat.live.body">Answers come from your repository, never from memory.</span></span></li>
+      <li><span class="fi" data-icon="trend"></span><span><b data-i18n="feat.rank">Explainable ranking</b> <span data-i18n="feat.rank.body">Every score shows the signals behind it.</span></span></li>
+      <li><span class="fi" data-icon="shield"></span><span><b data-i18n="feat.human">Human in the loop</b> <span data-i18n="feat.human.body">A comment is only posted after an approver says yes.</span></span></li>
     </ul>
-    <label for="key">Your key</label>
+    <label for="key" data-i18n="key.label">Your key</label>
     <div class="pw">
-      <input id="key" type="password" autocomplete="off" placeholder="Paste the key you were given">
+      <input id="key" type="password" autocomplete="off" placeholder="Paste the key you were given" data-i18n-placeholder="key.placeholder">
       <button type="button" class="ghost small" id="showKey" aria-label="Show or hide the key">Show</button>
     </div>
     <div class="row">
@@ -400,7 +412,7 @@ export const INDEX_HTML = `<!doctype html>
   <div class="col">
     <section class="panel">
       <div class="sec-head">
-        <h2 data-icon="pr">Review queue</h2>
+        <h2 data-icon="pr"><span data-i18n="queue.title">Review queue</span></h2>
         <span class="muted" id="queueMeta"></span>
         <span class="spacer"></span>
         <button id="refresh">Refresh</button>
@@ -416,8 +428,8 @@ export const INDEX_HTML = `<!doctype html>
             <select id="fSort" aria-label="Sort"></select>
           </div>
           <div class="tool-row">
-            <label class="switch"><input type="checkbox" id="fWarn"> Only with warnings</label>
-            <label class="switch"><input type="checkbox" id="fHideDrafts"> Hide drafts</label>
+            <label class="switch"><input type="checkbox" id="fWarn"> <span data-i18n="queue.warn">Only with warnings</span></label>
+            <label class="switch"><input type="checkbox" id="fHideDrafts"> <span data-i18n="queue.hideDrafts">Hide drafts</span></label>
           </div>
         </div>
         <div class="result-bar">
@@ -434,7 +446,7 @@ export const INDEX_HTML = `<!doctype html>
   <div class="col">
     <section class="panel hidden" id="digestPanel">
       <div class="sec-head">
-        <h2 data-icon="clock">Scheduled digest</h2>
+        <h2 data-icon="clock"><span data-i18n="digest.title">Scheduled digest</span></h2>
         <span class="chip" id="digestChip"></span>
         <span class="spacer"></span>
         <button class="small" id="digestToggle">Show last message</button>
@@ -447,14 +459,14 @@ export const INDEX_HTML = `<!doctype html>
     </section>
     <section class="panel">
       <div class="sec-head">
-        <h2 data-icon="shield">Approvals</h2>
+        <h2 data-icon="shield"><span data-i18n="approvals.title">Approvals</span></h2>
         <span class="chip warn hidden" id="pendingCount"></span>
         <span class="spacer"></span>
         <button class="small" id="toggleActs">Expand all</button>
         <button class="ghost" id="refreshActions">Reload</button>
       </div>
       <div class="sec-body">
-        <div class="muted" style="margin-bottom:10px">Nothing is posted to GitHub until an approver approves the exact text shown.</div>
+        <div class="muted" style="margin-bottom:10px" data-i18n="approvals.note">Nothing is posted to GitHub until an approver approves the exact text shown.</div>
         <div class="tabs" id="actTabs" role="tablist"></div>
         <div id="actions"></div>
       </div>
@@ -464,13 +476,13 @@ export const INDEX_HTML = `<!doctype html>
 
 <button class="fab hidden" id="fab" aria-controls="drawer" aria-expanded="false">
   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 3h16a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H9l-5 4v-4H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2zm4 6v2h8V9H8zm0 4v2h5v-2H8z"/></svg>
-  <span>Ask the agent</span>
+  <span data-i18n="chat.ask">Ask the agent</span>
   <i class="dot hidden" id="fabDot"></i>
 </button>
 <div class="backdrop" id="backdrop"></div>
 <aside class="drawer" id="drawer" role="dialog" aria-label="Ask the agent" aria-hidden="true">
   <div class="drawer-head">
-    <h2 data-icon="bot">Ask the agent</h2>
+    <h2 data-icon="bot"><span data-i18n="chat.ask">Ask the agent</span></h2>
     <span class="spacer"></span>
     <button class="ghost small" id="newChat" title="Start a fresh conversation">New chat</button>
     <button class="ghost small" id="closeChat" aria-label="Close chat">Close</button>
@@ -481,16 +493,16 @@ export const INDEX_HTML = `<!doctype html>
   <div class="drawer-foot">
     <div class="suggest" id="suggest"></div>
     <div class="composer">
-      <textarea id="text" rows="2" placeholder="What should we review first?"></textarea>
+      <textarea id="text" rows="2" maxlength="2000" placeholder="What should we review first?" data-i18n-placeholder="chat.placeholder"></textarea>
       <button class="primary" id="send">Send</button>
     </div>
-    <div class="muted" style="margin-top:6px">Enter to send, Shift+Enter for a new line, Esc to close.</div>
+    <div class="composer-meta muted"><span id="textCount">0 / 2000</span><span data-i18n="chat.hint">Enter to send, Shift+Enter for a new line, Esc to close.</span></div>
   </div>
 </aside>
 <div class="modal-back hidden" id="guideModal">
   <div class="modal" role="dialog" aria-modal="true" aria-labelledby="guideTitle">
     <div class="modal-head">
-      <h2 id="guideTitle" data-icon="help">What can I do here?</h2>
+      <h2 id="guideTitle" data-icon="help"><span data-i18n="guide.title">What can I do here?</span></h2>
       <span class="spacer"></span>
       <button class="ghost small" id="guideClose" aria-label="Close the guide">Close</button>
     </div>
@@ -504,10 +516,24 @@ export const INDEX_HTML = `<!doctype html>
 
 export const APP_JS = `
 (function () {
+  var I18N = ${JSON.stringify({ en: EN, he: HE })};
+  var locale = "en";
+  try { var savedLang = localStorage.getItem("lang"); if (savedLang === "he" || savedLang === "en") locale = savedLang; } catch (eLang) {}
+  function t(key, vars) {
+    var table = I18N[locale] || I18N.en;
+    var s = table[key] || I18N.en[key] || key;
+    if (!vars) return s;
+    return s.replace(/\{([a-zA-Z0-9_]+)\}/g, function (whole, name) {
+      return Object.prototype.hasOwnProperty.call(vars, name) ? String(vars[name]) : whole;
+    });
+  }
   var $ = function (id) { return document.getElementById(id); };
   /* No key is kept in the page: signing in sets an HttpOnly session cookie that scripts cannot read. */
   var signedIn = false;
   var role = "";
+  var youLogin = "";
+  var actorId = "";
+  var meName = "";
   var queueData = null;
   var conv = sessionStorage.getItem("conv");
   if (!conv) { conv = (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random().toString(16).slice(2)); sessionStorage.setItem("conv", conv); }
@@ -648,7 +674,16 @@ export const APP_JS = `
     opts.headers = Object.assign({ "Content-Type": "application/json", "X-Requested-With": "pr-triage" }, opts.headers || {});
     return fetch(path, opts).then(function (r) {
       return r.json().catch(function () { return {}; }).then(function (body) {
-        if (r.status === 401) { if (path !== "/api/login") signOut(false); throw new Error(body.error || "Signed out"); }
+        if (r.status === 401) {
+          if (path !== "/api/login") {
+            signedIn = false;
+            $("main").classList.add("hidden"); $("userbar").classList.add("hidden"); $("login").classList.remove("hidden");
+            $("fab").classList.add("hidden"); $("guideModal").classList.add("hidden");
+            if (chatIsOpen()) closeChat();
+            toast(t("session.expired"), "warn");
+          }
+          throw new Error(body.error || t("chat.signedOut"));
+        }
         if (!r.ok && !body.text) throw new Error(body.error || ("HTTP " + r.status));
         return body;
       });
@@ -676,8 +711,8 @@ export const APP_JS = `
     var box = $("chat"); clear(box);
     var e = el("div", "chat-empty");
     var big = el("div", "empty-ic big"); big.appendChild(icon("bot")); e.appendChild(big);
-    e.appendChild(el("b", "", "Ask about your pull requests"));
-    e.appendChild(document.createTextNode("Answers come from live GitHub data. A comment is only posted after a human approves it."));
+    e.appendChild(el("b", "", t("chat.emptyTitle")));
+    e.appendChild(document.createTextNode(t("chat.emptyBody")));
     box.appendChild(e);
   }
 
@@ -867,16 +902,24 @@ export const APP_JS = `
     });
   }
 
+  var CHAT_MAX = 2000;
+  function updateTextCount() {
+    var n = $("text").value.length;
+    $("textCount").textContent = n + " / " + CHAT_MAX;
+    $("textCount").classList.toggle("warn", n >= CHAT_MAX - 100);
+  }
+
   function send() {
     var t = $("text").value.trim();
     if (!t || $("send").disabled) return;
+    if (t.length > CHAT_MAX) { toast(t("chat.tooLong", { limit: CHAT_MAX }), "bad"); return; }
     if (!chatIsOpen()) openChat();
     $("send").disabled = true;
-    bubble("me", t); $("text").value = "";
-    var wait = bubble("bot typing", "Checking GitHub");
+    bubble("me", t); $("text").value = ""; updateTextCount();
+    var wait = bubble("bot typing", t("chat.checking"));
     api("/api/chat", { method: "POST", body: JSON.stringify({ text: t, conversationId: conv }) })
       .then(function (r) { finishBot(wait, r.text); loadActions(); loadBudget(); })
-      .catch(function (e) { wait.className = "bubble bot err"; wait.textContent = "Sorry, that did not work: " + e.message; })
+      .catch(function (e) { wait.className = "bubble bot err"; wait.textContent = t("chat.sorry", { error: e.message }); })
       .then(function () {
         $("send").disabled = false;
         if (chatIsOpen()) $("text").focus(); else $("fabDot").classList.remove("hidden");
@@ -1265,15 +1308,36 @@ export const APP_JS = `
     saveFilters();
 
     var shown = sortItems(q.items.filter(matches), q.items);
-    $("resultCount").textContent = "Showing " + shown.length + " of " + q.items.length + " pull requests";
+    $("resultCount").textContent = t("queue.showing", { shown: shown.length, total: q.items.length });
     $("clearFilters").classList.toggle("hidden", !filtersActive());
 
     if (!shown.length) {
       box.appendChild(q.items.length
-        ? emptyState("search", "No pull requests match these filters.")
-        : emptyState("checkCircle", "No open pull requests. Nothing to review.", "ok"));
+        ? emptyState("search", t("queue.noMatch"))
+        : emptyState("checkCircle", t("queue.empty"), "ok"));
     }
-    shown.forEach(function (it) { box.appendChild(prCard(it, q.items.indexOf(it))); });
+    var groups;
+    if (youLogin) {
+      var forYou = [], yours = [], others = [];
+      shown.forEach(function (it) {
+        var me = youLogin.toLowerCase();
+        if (it.author && it.author.toLowerCase() === me) yours.push(it);
+        else if ((it.state === "needs_review" || it.state === "unclear") && (it.requestedReviewers || []).some(function (r) { return String(r).toLowerCase() === me; })) forYou.push(it);
+        else others.push(it);
+      });
+      groups = [
+        { title: t("queue.forYou"), items: forYou },
+        { title: t("queue.yours"), items: yours },
+        { title: t("queue.others"), items: others }
+      ];
+    } else {
+      groups = [{ title: "", items: shown }];
+    }
+    groups.forEach(function (g) {
+      if (!g.items.length) return;
+      if (g.title) box.appendChild(el("div", "q-sec", g.title));
+      g.items.forEach(function (it) { box.appendChild(prCard(it, q.items.indexOf(it))); });
+    });
 
     if (q.failed && q.failed.length) {
       var ul = el("ul", "unknowns");
@@ -1311,10 +1375,13 @@ export const APP_JS = `
     }
     $("refresh").disabled = true;
     api(opts.announce ? "/api/queue?refresh=1" : "/api/queue")
-      .then(function (r) { queueData = r.queue; renderQueue(); if (opts.announce) toast("Queue refreshed: " + r.queue.items.length + " open pull requests.", "ok"); })
+      .then(function (r) {
+        queueData = r.queue; renderQueue();
+        if (opts.announce) toast(r.cached ? t("queue.cached") : t("queue.refreshed", { count: r.queue.items.length }), "ok");
+      })
       .catch(function (e) {
         if (opts.quiet) return; // keep showing the last good list; the amber hint says it is old
-        clear(box); box.appendChild(emptyState("alert", "Could not load the queue: " + e.message, "bad"));
+        clear(box); box.appendChild(emptyState("alert", t("queue.loadFail", { error: e.message }), "bad"));
       })
       .then(function () { queueLoading = false; $("refresh").disabled = false; });
   }
@@ -1339,18 +1406,18 @@ export const APP_JS = `
   }
 
   /* ---------- approvals ---------- */
-  var ACTION_TONE = { pending: "warn", executed: "ok", rejected: "bad", failed: "bad", uncertain: "bad", executing: "info", expired: "" };
-  var ACTION_LABEL = { pending: "Waiting for approval", executed: "Posted", rejected: "Rejected", failed: "Not posted", uncertain: "Unconfirmed", executing: "Posting", expired: "Expired" };
-  var ACTION_ICON = { pending: "clock", executed: "checkCircle", rejected: "x", failed: "alert", uncertain: "help", executing: "refresh", expired: "clock" };
+  var ACTION_TONE = { pending: "warn", executed: "ok", rejected: "bad", failed: "bad", uncertain: "bad", executing: "info", expired: "", superseded: "" };
+  var ACTION_LABEL_KEYS = { pending: "status.pending", executed: "status.executed", rejected: "status.rejected", failed: "status.failed", uncertain: "status.uncertain", executing: "status.executing", expired: "status.expired", superseded: "status.superseded" };
+  var ACTION_ICON = { pending: "clock", executed: "checkCircle", rejected: "x", failed: "alert", uncertain: "help", executing: "refresh", expired: "clock", superseded: "refresh" };
 
   /* Three-step diagram of the approval life cycle: Requested -> Decision -> Posted. */
   function flowChart(status) {
     // Each step is "done", "now", "fail" or "todo".
-    var s2 = { pending: "now", executing: "done", executed: "done", failed: "done", uncertain: "done", rejected: "fail", expired: "fail" }[status] || "todo";
+    var s2 = { pending: "now", executing: "done", executed: "done", failed: "done", uncertain: "done", rejected: "fail", expired: "fail", superseded: "fail" }[status] || "todo";
     var s3 = { executing: "now", executed: "done", failed: "fail", uncertain: "fail" }[status] || "todo";
-    var l2 = { pending: "Awaiting approval", rejected: "Rejected", expired: "Expired" }[status] || "Approved";
-    var l3 = { executing: "Posting", executed: "Posted", failed: "Not posted", uncertain: "Unconfirmed" }[status] || "Post";
-    var steps = [["done", "Requested"], [s2, l2], [s3, l3]];
+    var l2 = { pending: t("flow.awaiting"), rejected: t("flow.rejected"), expired: t("flow.expired"), superseded: t("flow.superseded") }[status] || t("flow.approved");
+    var l3 = { executing: t("flow.posting"), executed: t("flow.posted"), failed: t("flow.notPosted"), uncertain: t("flow.unconfirmed") }[status] || t("flow.post");
+    var steps = [["done", t("flow.requested")], [s2, l2], [s3, l3]];
     var box = el("ol", "flow");
     steps.forEach(function (st, i) {
       var li = el("li", "step " + st[0]);
@@ -1395,7 +1462,7 @@ export const APP_JS = `
     head.appendChild(chev);
     var badge = el("span", "chip " + tone);
     badge.appendChild(icon(ACTION_ICON[a.status] || "dot"));
-    badge.appendChild(el("span", "", ACTION_LABEL[a.status] || a.status));
+    badge.appendChild(el("span", "", t(ACTION_LABEL_KEYS[a.status] || "") || a.status));
     head.appendChild(badge);
     var prHref = safeUrl(a.prUrl);
     var hmain = el("div", "act-main");
@@ -1432,49 +1499,55 @@ export const APP_JS = `
       box.appendChild(origBox);
     }
 
+    if (/@(?:[A-Za-z0-9])/.test(a.body) && /(^|[^A-Za-z0-9_])@[A-Za-z0-9]/.test(a.body)) {
+      box.appendChild(el("div", "note", t("approvals.mentions")));
+    }
     if (a.reason) {
       var why = el("div", "why");
-      why.appendChild(el("b", "", "Why the agent suggests it: "));
+      why.appendChild(el("b", "", t("approvals.why")));
       why.appendChild(document.createTextNode(a.reason));
       box.appendChild(why);
     }
+    if (actorId && a.requestedBy === actorId) box.appendChild(el("div", "muted", t("approvals.youAsked")));
 
     var foot = el("div", "row");
     foot.style.marginTop = "0";
 
     if (a.status === "pending" && role === "approver") {
-      var ok = iconBtn("primary", "check", "Approve and post");
-      var edit = iconBtn("ghost", "draft", "Edit text");
-      edit.title = "Change the wording before it is posted. The original draft is kept in the history.";
-      var no = iconBtn("danger", "x", "Reject");
-      var cancel = iconBtn("ghost small hidden", "x", "Cancel");
-      var armed = false, timer = null, editor = null;
-      var okLabel = function () { return editor ? "Approve and post edited text" : "Approve and post"; };
+      var ok = iconBtn("primary", "check", t("approvals.approve"));
+      var edit = iconBtn("ghost", "draft", t("approvals.edit"));
+      edit.title = t("approvals.editTitle");
+      var no = iconBtn("danger", "x", t("approvals.reject"));
+      var cancel = iconBtn("ghost small hidden", "x", t("approvals.cancel"));
+      var armed = false, armedKind = null, editor = null;
+      var okLabel = function () { return editor ? t("approvals.approveEdited") : t("approvals.approve"); };
       var startEdit = function (text) {
         editor = document.createElement("textarea");
         editor.value = text; editor.rows = 5; editor.maxLength = 2000;
-        editor.setAttribute("aria-label", "Edit the comment text before it is posted");
+        editor.setAttribute("aria-label", t("approvals.editAria"));
         editor.oninput = function () { actDraft[a.id] = editor.value; };
         quote.replaceChild(editor, quoteText);
-        quoteLabel.textContent = "Editing: exactly this text will be posted";
+        quoteLabel.textContent = t("approvals.editing");
         actDraft[a.id] = text;
-        setBtn(edit, "refresh", "Undo my edits"); setBtn(ok, "check", okLabel());
+        setBtn(edit, "refresh", t("approvals.undo")); setBtn(ok, "check", okLabel());
       };
       var stopEdit = function () {
         if (!editor) return;
         quote.replaceChild(quoteText, editor); editor = null; delete actDraft[a.id];
-        quoteLabel.textContent = "Exact comment text";
-        setBtn(edit, "draft", "Edit text"); setBtn(ok, "check", okLabel());
+        quoteLabel.textContent = t("approvals.exact");
+        setBtn(edit, "draft", t("approvals.edit")); setBtn(ok, "check", okLabel());
       };
       var disarm = function () {
-        armed = false; clearTimeout(timer); cancel.classList.add("hidden");
+        armed = false; armedKind = null; cancel.classList.add("hidden");
         if (editor) editor.readOnly = false;
-        ok.className = "primary"; setBtn(ok, "check", okLabel()); no.classList.remove("hidden"); edit.classList.remove("hidden");
+        ok.className = "primary"; setBtn(ok, "check", okLabel()); ok.classList.remove("hidden");
+        no.className = "danger"; setBtn(no, "x", t("approvals.reject")); no.classList.remove("hidden");
+        edit.classList.remove("hidden");
       };
       var decide = function (kind) {
         var payload = kind === "approve" && editor ? JSON.stringify({ body: editor.value }) : "{}";
         busy++; ok.disabled = true; no.disabled = true; edit.disabled = true; cancel.classList.add("hidden");
-        setBtn(kind === "approve" ? ok : no, "refresh", "Working...");
+        setBtn(kind === "approve" ? ok : no, "refresh", t("approvals.working"));
         api("/api/actions/" + encodeURIComponent(a.id) + "/" + kind, { method: "POST", body: payload })
           .then(function (r) { toast(r.text, r.ok === false ? "bad" : "ok"); if (r.ok !== false) delete actDraft[a.id]; })
           .catch(function (e) { toast(e.message, "bad"); })
@@ -1482,23 +1555,30 @@ export const APP_JS = `
       };
       ok.onclick = function () {
         if (!armed) {
-          if (editor && !editor.value.trim()) { toast("The comment is empty. Write the text to post, or undo your edits.", "bad"); return; }
-          // Posting is public and cannot be undone: ask once more, then time out. The text is frozen meanwhile.
-          armed = true; if (editor) editor.readOnly = true;
-          ok.className = "confirm"; setBtn(ok, "check", "Confirm: post this comment");
+          if (editor && !editor.value.trim()) { toast(t("approvals.emptyEdit"), "bad"); return; }
+          // Posting is public and cannot be undone: stay armed until they confirm or Cancel.
+          armed = true; armedKind = "approve"; if (editor) editor.readOnly = true;
+          ok.className = "confirm"; setBtn(ok, "check", t("approvals.confirm"));
           no.classList.add("hidden"); edit.classList.add("hidden"); cancel.classList.remove("hidden");
-          timer = setTimeout(disarm, 8000);
           return;
         }
-        decide("approve");
+        if (armedKind === "approve") decide("approve");
       };
       edit.onclick = function () { if (editor) stopEdit(); else { startEdit(a.body); editor.focus(); } };
-      no.onclick = function () { decide("reject"); };
+      no.onclick = function () {
+        if (!armed) {
+          armed = true; armedKind = "reject";
+          no.className = "confirm danger"; setBtn(no, "x", t("approvals.confirmReject"));
+          ok.classList.add("hidden"); edit.classList.add("hidden"); cancel.classList.remove("hidden");
+          return;
+        }
+        if (armedKind === "reject") decide("reject");
+      };
       cancel.onclick = disarm;
       foot.appendChild(ok); foot.appendChild(edit); foot.appendChild(no); foot.appendChild(cancel);
       if (Object.prototype.hasOwnProperty.call(actDraft, a.id)) startEdit(actDraft[a.id]);
     } else if (a.status === "pending") {
-      foot.appendChild(el("span", "muted", "Waiting for an approver. Only an approver can approve."));
+      foot.appendChild(el("span", "muted", t("approvals.waitApprover")));
     } else if (a.status === "executed") {
       var done = safeUrl(a.resultUrl) || prHref;
       if (done) foot.appendChild(linkBtn(done, "external", a.resultUrl ? "View comment on GitHub" : "Open pull request", "ok"));
@@ -1548,8 +1628,8 @@ export const APP_JS = `
     var shown = actTab === "pending" ? pending : actionList;
     if (!shown.length) {
       box.appendChild(actTab === "pending"
-        ? emptyState("shield", "Nothing is waiting for approval.", "ok")
-        : emptyState("inbox", "No actions yet. Ask the agent to propose a comment."));
+        ? emptyState("shield", t("approvals.emptyPending"), "ok")
+        : emptyState("inbox", t("approvals.emptyAll")));
       return;
     }
     var limited = actTab === "all" && !actShowAll && shown.length > HISTORY_LIMIT;
@@ -1579,6 +1659,7 @@ export const APP_JS = `
     if (!signedIn || document.hidden) return;
     updateQueueMeta();
     loadDigest(); /* local database only, no GitHub call */
+    refreshIfStale();
     if (!busy && !document.querySelector("#actions button.confirm") && !document.querySelector("#actions textarea")) loadActions();
   }, 30000);
 
@@ -1601,12 +1682,15 @@ export const APP_JS = `
   function signIn() {
     return api("/api/me").then(function (me) {
       role = me.role; signedIn = true;
+      meName = me.name || "";
+      youLogin = me.githubLogin || "";
+      actorId = me.name && me.name.indexOf("shared") !== 0 ? "web:" + me.name : (role === "approver" ? "web:approver" : "web:reader");
       $("login").classList.add("hidden"); $("main").classList.remove("hidden"); $("userbar").classList.remove("hidden");
       $("fab").classList.remove("hidden");
       $("repo").textContent = me.repo;
       repoSlug = me.repo;
       var who = $("who");
-      who.textContent = (role === "approver" ? "Approver" : "Reader (cannot approve)") + (me.name && me.name.indexOf("shared") !== 0 ? " - " + me.name : "");
+      who.textContent = (role === "approver" ? t("who.approver") : t("who.reader")) + (me.name && me.name.indexOf("shared") !== 0 ? " - " + me.name : "");
       who.className = "chip " + (role === "approver" ? "ok" : "");
       loadQueue(); loadActions(); loadBudget(); loadGuide(); loadDigest();
     });
@@ -1614,9 +1698,9 @@ export const APP_JS = `
 
   $("loginBtn").onclick = function () {
     var typed = $("key").value.trim(); $("loginMsg").textContent = "";
-    if (!typed) { $("loginMsg").textContent = "Enter your key."; return; }
+    if (!typed) { $("loginMsg").textContent = t("login.enterKey"); return; }
     api("/api/login", { method: "POST", body: JSON.stringify({ key: typed }) })
-      .then(function () { $("key").value = ""; $("key").type = "password"; $("showKey").textContent = "Show"; return signIn(); })
+      .then(function () { $("key").value = ""; $("key").type = "password"; setBtn($("showKey"), "eye", t("key.show")); return signIn(); })
       .catch(function (e) { $("loginMsg").textContent = e.message; });
   };
   $("key").addEventListener("keydown", function (e) { if (e.key === "Enter") $("loginBtn").click(); });
@@ -1631,7 +1715,13 @@ export const APP_JS = `
     if (guideIsOpen()) closeGuide(); else if (chatIsOpen()) closeChat();
   });
   renderChatEmpty();
-  $("text").addEventListener("keydown", function (e) { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } });
+  $("text").addEventListener("input", updateTextCount);
+  $("text").addEventListener("keydown", function (e) {
+    if (e.key !== "Enter" || e.shiftKey) return;
+    if (e.isComposing || e.keyCode === 229) return;
+    e.preventDefault(); send();
+  });
+  updateTextCount();
   $("refresh").onclick = function () { loadQueue(true); };
   $("toggleActs").onclick = function () {
     var cards = document.querySelectorAll("#actions .act");
@@ -1640,29 +1730,80 @@ export const APP_JS = `
     shown.forEach(function (a) { actOpen[a.id] = !allOpen; });
     renderActions();
   };
-  $("refreshActions").onclick = function () { loadActions().then(function () { toast("Approvals reloaded."); }); };
+  $("refreshActions").onclick = function () { loadActions().then(function () { toast(t("approvals.reloaded")); }); };
 
-  /* Icons on the static buttons. */
-  setBtn($("refresh"), "refresh", "Refresh");
-  setBtn($("refreshActions"), "refresh", "Reload");
-  setBtn($("logout"), "logout", "Sign out");
-  setBtn($("guideBtn"), "help", "Guide");
-  setBtn($("guideClose"), "x", "Close");
+  function paintChrome() {
+    applyStates();
+    SORTS = [
+      ["queue", t("sort.queue")],
+      ["score_desc", t("sort.score_desc")],
+      ["score_asc", t("sort.score_asc")],
+      ["num_desc", t("sort.num_desc")],
+      ["num_asc", t("sort.num_asc")],
+      ["signals", t("sort.signals")]
+    ];
+    CONFS = [["all", t("conf.all")], ["high", t("conf.high")], ["medium", t("conf.medium")], ["low", t("conf.low")]];
+    SUGGESTIONS = [t("suggest.0"), t("suggest.1"), t("suggest.2"), t("suggest.3")];
+    Array.prototype.forEach.call(document.querySelectorAll("[data-i18n]"), function (n) {
+      n.textContent = t(n.getAttribute("data-i18n"));
+    });
+    Array.prototype.forEach.call(document.querySelectorAll("[data-i18n-placeholder]"), function (n) {
+      n.setAttribute("placeholder", t(n.getAttribute("data-i18n-placeholder")));
+    });
+    Array.prototype.forEach.call(document.querySelectorAll("[data-i18n-title]"), function (n) {
+      n.setAttribute("title", t(n.getAttribute("data-i18n-title")));
+    });
+    setBtn($("refresh"), "refresh", t("queue.refresh"));
+    setBtn($("refreshActions"), "refresh", t("approvals.reload"));
+    setBtn($("logout"), "logout", t("logout"));
+    setBtn($("guideBtn"), "help", t("guide.btn"));
+    setBtn($("guideClose"), "x", t("guide.close"));
+    setBtn($("send"), "send", t("chat.send"));
+    setBtn($("newChat"), "plus", t("chat.new"));
+    setBtn($("closeChat"), "x", t("chat.close"));
+    setBtn($("clearFilters"), "clear", t("queue.clear"));
+    $("loginBtn").textContent = t("login.signIn");
+    $("theme").setAttribute("title", t("theme.title"));
+    $("lang").textContent = locale === "he" ? t("lang.en") : t("lang.he");
+    $("lang").setAttribute("title", t("lang.title"));
+    $("guideBtn").setAttribute("title", t("guide.btnTitle"));
+    $("search").setAttribute("placeholder", t("queue.search"));
+    $("search").setAttribute("aria-label", t("queue.searchAria"));
+    $("drawer").setAttribute("aria-label", t("chat.ask"));
+    $("stateChips").setAttribute("aria-label", t("queue.statesAria"));
+    $("stack").setAttribute("aria-label", t("queue.stackAria"));
+    applyTheme(currentTheme());
+    if (signedIn && role) {
+      $("who").textContent = (role === "approver" ? t("who.approver") : t("who.reader")) + (meName && meName.indexOf("shared") !== 0 ? " - " + meName : "");
+    }
+  }
+  function applyStates() {
+    STATES.needs_review.label = t("state.needs_review"); STATES.needs_review.hint = t("state.needs_review.hint");
+    STATES.ready_to_merge.label = t("state.ready_to_merge"); STATES.ready_to_merge.hint = t("state.ready_to_merge.hint");
+    STATES.waiting_on_author.label = t("state.waiting_on_author"); STATES.waiting_on_author.hint = t("state.waiting_on_author.hint");
+    STATES.draft.label = t("state.draft"); STATES.draft.hint = t("state.draft.hint");
+    STATES.unclear.label = t("state.unclear"); STATES.unclear.hint = t("state.unclear.hint");
+  }
+  function applyLang() {
+    document.documentElement.lang = locale === "he" ? "he" : "en";
+    document.documentElement.dir = locale === "he" ? "rtl" : "ltr";
+    paintChrome();
+    if (queueData) renderQueue();
+    if (signedIn) renderActions();
+    if (!$("chat").querySelector(".bubble")) renderChatEmpty();
+    renderSuggestions();
+  }
   $("guideBtn").onclick = openGuide;
   $("guideClose").onclick = closeGuide;
   /* Click on the dark area (not the card) closes it; Tab stays on the Close button, the only control inside. */
   $("guideModal").addEventListener("click", function (e) { if (e.target === $("guideModal")) closeGuide(); });
   $("guideModal").addEventListener("keydown", function (e) { if (e.key === "Tab") { e.preventDefault(); $("guideClose").focus(); } });
-  setBtn($("send"), "send", "Send");
-  setBtn($("newChat"), "plus", "New chat");
-  setBtn($("closeChat"), "x", "Close");
-  setBtn($("clearFilters"), "clear", "Clear filters");
-  setBtn($("showKey"), "eye", "Show");
+  setBtn($("showKey"), "eye", t("key.show"));
   var fabSvg = $("fab").querySelector("svg"); if (fabSvg) $("fab").replaceChild(icon("chat"), fabSvg);
   $("showKey").onclick = function () {
     var shown = $("key").type === "text";
     $("key").type = shown ? "password" : "text";
-    setBtn($("showKey"), "eye", shown ? "Show" : "Hide");
+    setBtn($("showKey"), "eye", shown ? t("key.show") : t("key.hide"));
   };
 
   /* Keyboard: "/" jumps to the search box, like most developer tools. */
@@ -1702,7 +1843,12 @@ export const APP_JS = `
     applyTheme(next);
     try { localStorage.setItem("theme", next); } catch (e) {}
   };
-  renderSuggestions();
+  $("lang").onclick = function () {
+    locale = locale === "he" ? "en" : "he";
+    try { localStorage.setItem("lang", locale); } catch (e) {}
+    applyLang();
+  };
+  applyLang();
   /* Already signed in (valid session cookie)? Go straight to the app; otherwise this just shows the login box. */
   signIn().catch(function () {});
 })();

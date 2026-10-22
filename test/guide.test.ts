@@ -10,6 +10,7 @@ describe("the user guide", () => {
     expect(g.youAre).toMatch(/cannot approve/i);
     expect(section(g, "can")).not.toMatch(/approve or reject a comment request/i);
     expect(all(g)).toMatch(/nothing is posted until an approver approves/i);
+    expect(section(g, "can")).toMatch(/Say the wording, or what it should ask/);
   });
 
   it("tells an approver what they can do and where to do it, in each channel", () => {

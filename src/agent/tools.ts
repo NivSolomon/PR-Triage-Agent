@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { ApprovalError } from "../approvals/service.js";
 import type { ApprovalService } from "../approvals/service.js";
-import type { GitHubClient } from "../github/client.js";
+import { GitHubError, type GitHubClient } from "../github/client.js";
 import type { ActionRecord } from "../store/actions.js";
 import { assessPr } from "../triage/analyze.js";
 import { buildQueue } from "../triage/queue.js";
@@ -17,7 +17,19 @@ export interface ToolContext {
   /** GitHub login of the person asking, when known. Lets the queue say what is waiting on them. */
   githubLogin?: string;
   /** Called with each action the agent proposed in this request, so the channel can show an approval card. */
-  onProposed?: (a: ActionRecord) => void;
+  onProposed?: (a: ActionRecord, replaced?: ActionRecord[]) => void;
+  /**
+   * Pull requests loaded with get_pull_request in this request. When set, propose_comment is refused
+   * until that PR has been fetched, so the model cannot invent a comment for a number it has not read.
+   * Omit for MCP clients that pass the exact body themselves.
+   */
+  fetchedPrs?: Set<number>;
+  /**
+   * The user's question. When set with requireCommentIntent, propose_comment is refused unless they
+   * gave wording or a clear intent (what the comment should ask). Omit for MCP clients.
+   */
+  userText?: string;
+  requireCommentIntent?: boolean;
 }
 
 export interface ToolDeps {
@@ -70,8 +82,10 @@ const TOOL_SPECS: ToolSpec[] = [
     name: "propose_comment",
     description:
       "PROPOSE a public comment on a pull request. This does NOT post anything: it creates a request " +
-      "that a human approver must approve first. Only use it when the user explicitly asks to leave a comment " +
-      "or send a nudge. Write the exact final text.",
+      "that a human approver must approve first. Call get_pull_request for that number first. " +
+      "Only use it when the user gave the wording or a clear intent (what the comment should ask). " +
+      "If they only said 'write a comment' with no content, do not call this: ask what it should say. " +
+      "body must be the exact final text: the user's words if they gave them, otherwise one short comment from their intent and the fetched facts. Never invent a generic status ping.",
     parameters: {
       type: "object",
       properties: {
@@ -107,6 +121,7 @@ export async function runTool(
         const { limit } = queueArgs.parse(rawArgs ?? {});
         const q = await buildQueue(deps.github, { limit, now: deps.now?.() });
         const me = ctx.githubLogin?.toLowerCase();
+        for (const a of q.items) ctx.fetchedPrs?.add(a.number);
         return json({
           repo: q.repo,
           generatedAt: q.generatedAt,
@@ -136,7 +151,20 @@ export async function runTool(
       }
       case "get_pull_request": {
         const { number } = prArgs.parse(rawArgs);
-        const pr = await deps.github.getPr(number);
+        let pr;
+        try {
+          pr = await deps.github.getPr(number);
+        } catch (err) {
+          if (err instanceof GitHubError && err.status === 404) {
+            return json({
+              error: `Pull request #${number} does not exist in this repository. It was not found on GitHub. Do not invent a title, status, CI result, or URL for it.`,
+              notFound: true,
+              requestedNumber: number,
+            });
+          }
+          throw err;
+        }
+        ctx.fetchedPrs?.add(pr.number);
         const a = assessPr(pr, deps.now?.());
         return json({
           assessment: {
@@ -180,20 +208,37 @@ export async function runTool(
           return json({ error: "You are not allowed to propose comments. Nothing was created." });
         }
         const args = proposeArgs.parse(rawArgs);
-        const record = await deps.approvals.propose({
+        if (ctx.fetchedPrs && !ctx.fetchedPrs.has(args.prNumber)) {
+          return json({
+            error:
+              `Fetch pull request #${args.prNumber} with get_pull_request (or include it via get_review_queue) before proposing a comment. Then call propose_comment again. Nothing was created.`,
+          });
+        }
+        if (ctx.requireCommentIntent && ctx.userText !== undefined && !userGaveCommentIntent(ctx.userText)) {
+          return json({
+            error:
+              "The user did not give the comment wording or a clear intent (what it should ask). Ask them what the comment should say. Do not invent a status ping. Nothing was created.",
+          });
+        }
+        const { record, replaced } = await deps.approvals.propose({
           prNumber: args.prNumber,
           body: args.body,
           reason: args.reason,
           requestedBy: ctx.actor,
           via: ctx.via,
         });
-        ctx.onProposed?.(record);
+        ctx.onProposed?.(record, replaced);
         return json({
           status: "pending_approval",
+          prNumber: record.prNumber,
           actionId: record.id,
+          replacedIds: replaced.map((a) => a.id),
           note:
             "NOT posted. A human approver must approve this exact text first. " +
-            "Tell the user it is waiting for approval; do not say it was posted.",
+            "Tell the user it is waiting for approval; do not say it was posted." +
+            (replaced.length
+              ? ` Their previous pending comment on this PR was withdrawn (${replaced.map((a) => a.id.slice(0, 8)).join(", ")}) and can no longer be approved.`
+              : ""),
         });
       }
       default:
@@ -206,6 +251,16 @@ export async function runTool(
     if (err instanceof ApprovalError) return json({ error: err.message });
     return json({ error: err instanceof Error ? err.message : String(err) });
   }
+}
+
+/** True when the user quoted text, or said what the comment should ask. */
+export function userGaveCommentIntent(text: string): boolean {
+  const t = text.trim();
+  if (/["“”«»].{2,}["“”«»]/.test(t)) return true;
+  if (/\b(ask|asking|tell|telling|remind|nudge|say|saying|write that|post that|comment that)\b/i.test(t)) return true;
+  if (/(?:write|post|comment|leave)\s*:\s*\S/i.test(t)) return true;
+  if (/תבקש|לבקש|תגיד|להגיד|תזכיר|לתקן|\bתקן\b/.test(t)) return true;
+  return false;
 }
 
 function json(v: unknown): string {

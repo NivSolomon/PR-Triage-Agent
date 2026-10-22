@@ -2,8 +2,9 @@ import { describe, expect, it, vi } from "vitest";
 import { Agent } from "../src/agent/agent.js";
 import type { LlmPort, LlmRequest, LlmResponse } from "../src/agent/llm.js";
 import { systemPrompt } from "../src/agent/prompt.js";
-import { runTool, toolsFor } from "../src/agent/tools.js";
+import { runTool, toolsFor, userGaveCommentIntent } from "../src/agent/tools.js";
 import type { ToolContext } from "../src/agent/tools.js";
+import { GitHubError } from "../src/github/client.js";
 import { BudgetService } from "../src/budget/service.js";
 import { openDatabase } from "../src/store/db.js";
 import type { PrDetail } from "../src/github/types.js";
@@ -76,10 +77,8 @@ function setup(script: Script, budgetOver: Partial<ConstructorParameters<typeof 
   };
   const approvals = {
     propose: vi.fn(async (i: { prNumber: number; body: string; reason: string; requestedBy: string; via: string }) => ({
-      id: "act-1",
-      status: "pending",
-      prNumber: i.prNumber,
-      body: i.body,
+      record: { id: "act-1", status: "pending", prNumber: i.prNumber, body: i.body },
+      replaced: [],
     })),
   };
   const { llm, requests } = fakeLlm(script);
@@ -220,11 +219,130 @@ describe("Tools and permissions", () => {
     );
     const parsed = JSON.parse(out);
     expect(parsed.status).toBe("pending_approval");
+    expect(parsed.prNumber).toBe(1);
     expect(parsed.note).toMatch(/NOT posted/);
     expect(approvals.propose).toHaveBeenCalledWith(
       expect.objectContaining({ requestedBy: "slack:U01", via: "slack", body: "Please fix CI" }),
     );
     expect(sink).toHaveLength(1);
+  });
+
+  it("refuses propose_comment until that PR was fetched in this request", async () => {
+    const { approvals, github } = setup(() => ({}));
+    const sink: unknown[] = [];
+    const out = JSON.parse(
+      await runTool(
+        "propose_comment",
+        { prNumber: 1, body: "Please provide an update on the status of this pull request.", reason: "user asked" },
+        { ...proposerCtx(sink), fetchedPrs: new Set<number>() },
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        { github, approvals: approvals as any },
+      ),
+    );
+    expect(out.error).toMatch(/Fetch pull request #1/);
+    expect(approvals.propose).not.toHaveBeenCalled();
+    expect(sink).toHaveLength(0);
+  });
+
+  it("propose_comment after get_pull_request is allowed and reports prNumber", async () => {
+    const { approvals, github } = setup(() => ({}));
+    const sink: unknown[] = [];
+    const ctx = { ...proposerCtx(sink), fetchedPrs: new Set<number>() };
+    const deps = { github, approvals: approvals as never };
+    await runTool("get_pull_request", { number: 1 }, ctx, deps);
+    const parsed = JSON.parse(
+      await runTool("propose_comment", { prNumber: 1, body: "Please fix CI", reason: "CI red" }, ctx, deps),
+    );
+    expect(parsed.status).toBe("pending_approval");
+    expect(parsed.prNumber).toBe(1);
+    expect(sink).toHaveLength(1);
+  });
+
+  it("does not create a comment request when the model proposes before fetching the PR", async () => {
+    const { agent, approvals } = setup((_req, call) =>
+      call === 1
+        ? {
+            toolCalls: [
+              {
+                id: "t1",
+                name: "propose_comment",
+                arguments: JSON.stringify({
+                  prNumber: 3,
+                  body: "Please provide an update on the status of this pull request.",
+                  reason: "user asked",
+                }),
+              },
+            ],
+          }
+        : { content: "What should the comment on #3 say?" },
+    );
+    const res = await agent.ask(ask("write a comment on PR 3"));
+    expect(approvals.propose).not.toHaveBeenCalled();
+    expect(res.proposed).toHaveLength(0);
+    expect(res.text).toBe("What should the comment on #3 say?");
+    expect(res.text).not.toMatch(/Warning:/);
+  });
+
+  it("creates a pending comment after fetching the PR, without a grounding warning for PR 3", async () => {
+    const { agent, approvals } = setup((_req, call) =>
+      call === 1
+        ? {
+            toolCalls: [
+              { id: "t1", name: "get_pull_request", arguments: '{"number":3}' },
+              {
+                id: "t2",
+                name: "propose_comment",
+                arguments: JSON.stringify({
+                  prNumber: 3,
+                  body: "Sam, please fix the failing unit-tests.",
+                  reason: "user asked",
+                }),
+              },
+            ],
+          }
+        : { content: "A comment on #3 is waiting for approval." },
+    );
+    const res = await agent.ask(ask("Leave a comment on PR 3 asking sam to fix the failing unit-tests."));
+    expect(approvals.propose).toHaveBeenCalledOnce();
+    expect(res.proposed).toHaveLength(1);
+    expect(res.text).toBe("A comment on #3 is waiting for approval.");
+  });
+
+  it("does not create a comment request when the user gave no wording or intent, even after fetching", async () => {
+    const { agent, approvals } = setup((_req, call) =>
+      call === 1
+        ? {
+            toolCalls: [
+              { id: "t1", name: "get_pull_request", arguments: '{"number":3}' },
+              {
+                id: "t2",
+                name: "propose_comment",
+                arguments: JSON.stringify({
+                  prNumber: 3,
+                  body: "Please provide an update on the status of this pull request.",
+                  reason: "user asked",
+                }),
+              },
+            ],
+          }
+        : { content: "What should the comment on #3 say?" },
+    );
+    const res = await agent.ask(ask("write a comment on PR 3"));
+    expect(approvals.propose).not.toHaveBeenCalled();
+    expect(res.proposed).toHaveLength(0);
+    expect(res.text).toBe("What should the comment on #3 say?");
+  });
+
+  it("strips an invented GitHub URL for a pull request that was not found", async () => {
+    const { agent, github } = setup((_req, call) =>
+      call === 1
+        ? { toolCalls: [{ id: "t1", name: "get_pull_request", arguments: '{"number":999}' }] }
+        : { content: "I could not find #999.\nhttps://github.com/acme/app/pull/999" },
+    );
+    github.getPr.mockRejectedValue(new GitHubError("Not found on GitHub (acme/app).", 404));
+    const res = await agent.ask(ask("What is the status of pull request #999?"));
+    expect(res.text).toContain("I could not find #999.");
+    expect(res.text).not.toMatch(/github\.com\/acme\/app\/pull\/999/);
   });
 
   it("returns validation problems and lookup errors as results the model can explain", async () => {
@@ -233,6 +351,11 @@ describe("Tools and permissions", () => {
     const deps = { github, approvals: approvals as never };
     expect(JSON.parse(await runTool("get_pull_request", { number: -3 }, readerCtx, deps)).error).toMatch(/Invalid arguments/);
     expect(JSON.parse(await runTool("get_pull_request", { number: 9 }, readerCtx, deps)).error).toMatch(/Not found/);
+    github.getPr.mockRejectedValueOnce(new GitHubError("Not found on GitHub (acme/app).", 404));
+    const missing = JSON.parse(await runTool("get_pull_request", { number: 9 }, readerCtx, deps));
+    expect(missing.notFound).toBe(true);
+    expect(missing.requestedNumber).toBe(9);
+    expect(missing.error).toMatch(/does not exist/);
     expect(JSON.parse(await runTool("nope", {}, readerCtx, deps)).error).toMatch(/Unknown tool/);
   });
 
@@ -264,5 +387,17 @@ describe("Tools and permissions", () => {
     expect(p).toMatch(/subject-verb agreement/);
     expect(p).toMatch(/1 pull request/);
     expect(p).toMatch(/never "PR\(s\)"/);
+    expect(p).toMatch(/generic status ping/i);
+    expect(p).toMatch(/no wording and no intent/);
+    expect(p).toMatch(/Call get_pull_request for that number first/);
+    expect(p).toMatch(/notFound true/);
+    expect(p).toMatch(/even in a multi-part answer/);
+    expect(p).toMatch(/do not stop after the error/);
+  });
+
+  it("treats quoted wording and 'asking' as comment intent, but not a bare write-a-comment", () => {
+    expect(userGaveCommentIntent("write a comment on PR 3")).toBe(false);
+    expect(userGaveCommentIntent("Leave a comment on #102 asking sam to fix the failing unit-tests.")).toBe(true);
+    expect(userGaveCommentIntent('Please post "ping" on #102')).toBe(true);
   });
 });

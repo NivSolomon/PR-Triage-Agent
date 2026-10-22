@@ -1,7 +1,7 @@
 import { App, LogLevel } from "@slack/bolt";
 import type { KnownBlock, ModalView } from "@slack/types";
 import { WebClient } from "@slack/web-api";
-import { renderApprovalCard, renderOutcome } from "../approvals/render.js";
+import { containsAtMention, renderApprovalCard, renderOutcome } from "../approvals/render.js";
 import { buildGuide, renderGuideText } from "../guide.js";
 import type { ApprovalService } from "../approvals/service.js";
 import type { Agent } from "../agent/agent.js";
@@ -38,7 +38,7 @@ export interface SlackMessageEvent {
   user?: string;
   user_team?: string;
   text?: string;
-  message?: { user?: string; text?: string; bot_id?: string; subtype?: string };
+  message?: { user?: string; text?: string; bot_id?: string; subtype?: string; ts?: string; thread_ts?: string };
   previous_message?: { text?: string };
 }
 
@@ -67,12 +67,51 @@ export function incomingDirectMessage(
   return { userId: e.user, teamId: e.user_team, channel: e.channel, text: e.text };
 }
 
+/**
+ * An edit of an @mention in a channel or private channel. New mentions still arrive as `app_mention`;
+ * Slack does not re-send that event when the text is edited, so this watches `message_changed`.
+ * Requires `channels:history` / `groups:history`. Without `botUserId` we cannot tell a mention from
+ * every other edit, so we ignore it.
+ */
+export function incomingEditedMention(
+  event: SlackMessageEvent | unknown,
+  botUserId: string | undefined,
+): { userId: string; teamId?: string; channel: string; threadTs?: string; text: string } | null {
+  if (!botUserId || !event || typeof event !== "object") return null;
+  const e = event as SlackMessageEvent;
+  if (e.subtype !== "message_changed" || !e.channel) return null;
+  if (e.channel_type === "im") return null;
+
+  const inner = e.message;
+  if (!inner || inner.bot_id || inner.subtype || !inner.user || !inner.text) return null;
+  const next = inner.text.trim();
+  const prev = (e.previous_message?.text ?? "").trim();
+  if (!next || next === prev) return null;
+
+  const mention = `<@${botUserId}>`;
+  if (!next.includes(mention)) return null;
+
+  return {
+    userId: inner.user,
+    teamId: e.user_team,
+    channel: e.channel,
+    threadTs: inner.thread_ts ?? inner.ts,
+    text: inner.text,
+  };
+}
+
 export { slackSafe };
+
+/** A message we posted, with the resolved channel id Slack needs for later updates. */
+export interface PostedSlackMessage {
+  channel: string;
+  ts: string;
+}
 
 /** The only Slack calls the channel needs. Small on purpose, so tests can fake it. */
 export interface SlackApi {
   /** `channel` may be a channel id or a user id (a user id posts into that person's DM with the app). */
-  post(channel: string, text: string, opts?: { threadTs?: string; blocks?: KnownBlock[] }): Promise<string | undefined>;
+  post(channel: string, text: string, opts?: { threadTs?: string; blocks?: KnownBlock[] }): Promise<PostedSlackMessage | undefined>;
   remove(channel: string, ts: string): Promise<void>;
   /** Replace the contents of the app's Home tab for one person. */
   publishHome(userId: string, blocks: KnownBlock[]): Promise<void>;
@@ -98,9 +137,10 @@ class BoltSlackApi implements SlackApi {
     return id;
   }
 
-  async post(target: string, text: string, opts: { threadTs?: string; blocks?: KnownBlock[] } = {}): Promise<string | undefined> {
+  async post(target: string, text: string, opts: { threadTs?: string; blocks?: KnownBlock[] } = {}): Promise<PostedSlackMessage | undefined> {
+    const channel = await this.resolve(target);
     const res = await this.client.chat.postMessage({
-      channel: await this.resolve(target),
+      channel,
       text: withChatDirection(slackSafe(text)), // LTR/RTL mark so English stays left-to-right even next to a Hebrew title
       ...(opts.blocks ? { blocks: opts.blocks } : {}),
       ...(opts.threadTs ? { thread_ts: opts.threadTs } : {}),
@@ -108,7 +148,9 @@ class BoltSlackApi implements SlackApi {
       unfurl_links: false,
       unfurl_media: false,
     });
-    return res.ts;
+    // Slack's channel id (D... for a DM) is what chat.update needs later, not the user id we posted to.
+    const postedChannel = typeof res.channel === "string" && res.channel ? res.channel : channel;
+    return res.ts ? { channel: postedChannel, ts: res.ts } : undefined;
   }
 
   async remove(channel: string, ts: string): Promise<void> {
@@ -116,7 +158,12 @@ class BoltSlackApi implements SlackApi {
   }
 
   async update(channel: string, ts: string, text: string, blocks: KnownBlock[]): Promise<void> {
-    await this.client.chat.update({ channel, ts, text: withChatDirection(slackSafe(text)), blocks });
+    await this.client.chat.update({
+      channel: await this.resolve(channel),
+      ts,
+      text: withChatDirection(slackSafe(text)),
+      blocks,
+    });
   }
 
   async publishHome(userId: string, blocks: KnownBlock[]): Promise<void> {
@@ -185,12 +232,15 @@ export function approvalBlocks(a: ActionRecord): KnownBlock[] {
         mrkdwn(`${i === 0 ? "*Edited by the approver. The original draft was:*" : "*...continued:*"}\n\`\`\`${chunk}\`\`\``),
       )
     : [];
+  const mention = containsAtMention(a.body)
+    ? `_This comment @-mentions someone. Approving will notify them on GitHub._\n`
+    : "";
   const tail = [
     `*Why the agent suggests it:* ${slackSafe((a.reason || "(no reason given)").slice(0, 1200))}`,
     `*Requested by* ${slackSafe(a.requestedBy)} via ${slackSafe(a.requestedVia)}`,
     `*Expires:* ${slackSafe(a.expiresAt)}`,
     ``,
-    `_Nothing else will change. Without your approval, nothing is posted._`,
+    mention + `_Nothing else will change. Without your approval, nothing is posted._`,
   ].join("\n");
   return [
     mrkdwn(head),
@@ -226,6 +276,12 @@ export function approvalBlocks(a: ActionRecord): KnownBlock[] {
           style: "danger",
           value: a.id,
           text: { type: "plain_text", text: "Reject" },
+          confirm: {
+            title: { type: "plain_text", text: "Reject this request?" },
+            text: { type: "plain_text", text: "Nothing will be posted to GitHub." },
+            confirm: { type: "plain_text", text: "Reject" },
+            deny: { type: "plain_text", text: "Cancel" },
+          },
         },
       ],
     },
@@ -308,7 +364,7 @@ export function helpText(isApprover: boolean): string {
     "",
     renderGuideText(buildGuide(isApprover ? "approver" : "requester", { channel: "slack" })),
     "",
-    "How to talk to me: message me directly (the app's Messages tab). Your questions and my answers stay in the conversation. In a channel, @mention me and I reply in a thread.",
+    "How to talk to me: message me directly (the app's Messages tab). Your questions and my answers stay in the conversation. In a channel, @mention me and I reply in a thread. If you edit a DM or an @mention, I treat the new text as a new question.",
     "Examples:",
     "- What should we review first?",
     "- Why is #12 blocked?",
@@ -431,25 +487,72 @@ export class SlackChannel {
    * invite is the gate, the person who asked and the team channel get it too, so testers can click
    * Approve without being listed. Returns how many deliveries succeeded.
    */
-  async sendApprovalCards(record: ActionRecord): Promise<number> {
+  async sendApprovalCards(record: ActionRecord, replaced: ActionRecord[] = []): Promise<number> {
     const api = this.requireApi();
     const targets = new Set<string>(this.approvers);
     if (this.d.allowAllMembers === true) {
       if (this.d.teamChannelId) targets.add(this.d.teamChannelId);
       if (record.requestedBy?.startsWith("slack:")) targets.add(record.requestedBy.slice("slack:".length));
     }
+    if (replaced.length > 0) await this.retireCards(replaced);
+    const blocks = approvalBlocks(record);
+    if (replaced.length > 0) {
+      const ids = replaced.map((a) => `#${a.id.slice(0, 8)}`).join(", ");
+      blocks.splice(
+        blocks.length - 1,
+        0,
+        mrkdwn(`_This replaces ${ids} on the same pull request. Those older cards no longer have Approve buttons._`),
+      );
+    }
     let delivered = 0;
     for (const id of targets) {
       try {
-        await api.post(id, `Approval needed (#${record.id.slice(0, 8)}): comment on pull request #${record.prNumber}`, {
-          blocks: approvalBlocks(record),
-        });
-        delivered += 1;
+        const posted = await api.post(
+          id,
+          `Approval needed (#${record.id.slice(0, 8)}): comment on pull request #${record.prNumber}`,
+          { blocks },
+        );
+        if (posted) {
+          try {
+            this.d.approvals.rememberCard(record.id, posted.channel, posted.ts);
+          } catch (err) {
+            console.error(
+              `Posted the approval card to ${id} but could not remember ${posted.channel}/${posted.ts}:`,
+              err instanceof Error ? err.message : err,
+            );
+          }
+          delivered += 1;
+        }
       } catch (err) {
         console.error(`Could not send approval card to ${id}:`, err instanceof Error ? err.message : err);
       }
     }
     return delivered;
+  }
+
+  /**
+   * Replace Approve / Reject buttons on every stored copy of these cards with the outcome.
+   * Used when a request is replaced, rejected, expired, or recovered after a crash — not only
+   * when someone clicks the card that Slack delivered this event for.
+   */
+  async retireCards(records: ActionRecord[]): Promise<void> {
+    if (!this.api) return;
+    const api = this.api;
+    for (const record of records) {
+      if (record.status === "pending" || record.status === "executing") continue;
+      const outcome = renderOutcome(record);
+      const blocks = decidedBlocks(approvalBlocks(record), outcome);
+      for (const card of this.d.approvals.cardsFor(record.id)) {
+        try {
+          await api.update(card.channel, card.ts, outcome, blocks);
+        } catch (err) {
+          console.error(
+            `Could not update Slack card ${card.channel}/${card.ts}:`,
+            err instanceof Error ? err.message : err,
+          );
+        }
+      }
+    }
   }
 
   // ---------------------------------------------------------------- handlers
@@ -522,7 +625,7 @@ export class SlackChannel {
     // A visible "working" note, replaced by the answer. Failing to show it must never block the answer.
     let placeholder: string | undefined;
     try {
-      placeholder = await api.post(p.channel, "Looking at the pull requests…", opts);
+      placeholder = (await api.post(p.channel, "Looking at the pull requests…", opts))?.ts;
     } catch {
       placeholder = undefined;
     }
@@ -535,7 +638,7 @@ export class SlackChannel {
 
     return this.converse({
       userId: p.userId,
-      conversationId: `slack:${p.channel}:${p.threadTs ?? p.userId}`,
+      conversationId: `slack:${p.channel}:${p.threadTs ?? "root"}:${p.userId}`,
       text,
       say: async (t) => {
         await clear();
@@ -567,7 +670,8 @@ export class SlackChannel {
   }
 
   /**
-   * A click on Approve or Reject. `finish` shows the outcome on the card (and removes the buttons);
+   * A click on Approve or Reject. `finish` shows the outcome on the card that was clicked;
+   * every other stored copy (the app DM, the team channel, other approvers) is updated too.
    * `notice` is a private message to the clicker.
    */
   async handleDecision(p: {
@@ -578,6 +682,8 @@ export class SlackChannel {
     id: string;
     /** Approve only: the approver corrected the text in the pop-up. */
     editedBody?: string;
+    /** The Slack message that was clicked, so we can remember it if send-time tracking missed it. */
+    card?: { channel?: string; ts?: string };
     finish: (outcome: string, record?: ActionRecord) => Promise<void>;
     notice: (text: string) => Promise<void>;
   }): Promise<void> {
@@ -586,11 +692,25 @@ export class SlackChannel {
     if (!this.isApprover(actor, p.teamId)) return p.notice("Only approvers can do that.");
 
     const result = await decide(this.d.approvals, p.kind, p.id, actor, p.editedBody);
+    const done = result.record ?? this.d.approvals.get?.(p.id) ?? undefined;
+    if (done && p.card?.channel && p.card.ts) {
+      try {
+        this.d.approvals.rememberCard(done.id, p.card.channel, p.card.ts);
+      } catch (err) {
+        console.error(
+          `Could not remember Slack card ${p.card.channel}/${p.card.ts}:`,
+          err instanceof Error ? err.message : err,
+        );
+      }
+    }
     try {
       await p.finish(result.text, result.record);
     } catch {
       await p.notice(result.text);
     }
+    // Slack's replace_original only rewrites the message that was clicked. The same request is
+    // also posted to the app DM and the team channel; close those copies too.
+    if (done) await this.retireCards([done]);
 
     // Tell the person who asked, if it was someone else.
     const requester = result.record?.requestedBy;
@@ -639,9 +759,10 @@ export class SlackChannel {
     // Cards with buttons go to the approver's DM with the app, not into a channel.
     const api = this.requireApi();
     for (const a of list) {
-      await api.post(userId, `Approval needed (#${a.id.slice(0, 8)}): comment on pull request #${a.prNumber}`, {
+      const posted = await api.post(userId, `Approval needed (#${a.id.slice(0, 8)}): comment on pull request #${a.prNumber}`, {
         blocks: approvalBlocks(a),
       });
+      if (posted) this.d.approvals.rememberCard(a.id, posted.channel, posted.ts);
     }
     return say(`Sent ${count(list.length, "approval card")} to your direct messages with me.`);
   }
@@ -683,12 +804,18 @@ export class SlackChannel {
       });
       await p.say(result.text);
       for (const record of result.proposed) {
-        const n = await this.sendApprovalCards(record);
+        const mine = result.replaced.filter((a) => a.prNumber === record.prNumber);
+        const n = await this.sendApprovalCards(record, mine);
         await p.say(
           n > 0
             ? `Sent for approval (#${record.id.slice(0, 8)}). Nothing is posted until an approver approves it.`
             : `Created request #${record.id.slice(0, 8)}, but I could not reach any approver on Slack. It stays pending for 24 hours and can be approved from the web page. Nothing is posted yet.`,
         );
+        if (mine.length > 0) {
+          await p.say(
+            `Your earlier pending comment on #${record.prNumber} was withdrawn. The older card no longer has Approve buttons.`,
+          );
+        }
       }
     } catch (err) {
       console.error("Slack answer failed:", err instanceof Error ? err.message : err);
@@ -759,7 +886,7 @@ export class SlackChannel {
 
     // `app.message` skips edits (they arrive as subtype message_changed). Listen to the raw event instead.
     app.event("message", async ({ event }) => {
-      const incoming = incomingDirectMessage(event);
+      const incoming = incomingDirectMessage(event) ?? incomingEditedMention(event, this.botUserId);
       if (!incoming) return;
       void this.handleMessage(incoming).catch((err) =>
         console.error("Slack message failed:", err instanceof Error ? err.message : err),
@@ -769,7 +896,13 @@ export class SlackChannel {
     const onClick = (kind: DecisionKind) =>
       async ({ ack, body, action, respond }: {
         ack: () => Promise<void>;
-        body: { user: { id: string; team_id?: string }; team?: { id?: string }; message?: { blocks?: unknown[] } };
+        body: {
+          user: { id: string; team_id?: string };
+          team?: { id?: string };
+          channel?: { id?: string };
+          container?: { channel_id?: string; message_ts?: string };
+          message?: { ts?: string; blocks?: unknown[] };
+        };
         action: { value?: string };
         respond: (m: { replace_original: boolean; text: string; blocks: KnownBlock[] }) => Promise<unknown>;
       }): Promise<void> => {
@@ -778,18 +911,22 @@ export class SlackChannel {
         if (!id) return;
         // Keep the card the approver saw and swap the buttons for the outcome.
         const card = (body.message?.blocks ?? []) as KnownBlock[];
+        const channel = body.container?.channel_id ?? body.channel?.id;
+        const ts = body.container?.message_ts ?? body.message?.ts;
         await this.handleDecision({
           userId: body.user.id,
           teamId: body.user.team_id ?? body.team?.id,
           kind,
           id,
+          card: { channel, ts },
           finish: async (outcome) => {
             await respond({
               replace_original: true,
               text: slackSafe(outcome),
               blocks: decidedBlocks(card, outcome),
             });
-          },          notice: async (text) => {
+          },
+          notice: async (text) => {
             await this.requireApi().post(body.user.id, text);
           },
         }).catch((err) => console.error("Slack decision failed:", err instanceof Error ? err.message : err));
@@ -841,6 +978,7 @@ export class SlackChannel {
         kind: "approve",
         id: meta.id,
         editedBody: text,
+        card: { channel: meta.channel, ts: meta.ts },
         finish: async (outcome, record) => {
           // Without the card or the decided record, fall back to a private message (see handleDecision).
           if (!record || !meta.channel || !meta.ts) throw new Error("card unknown");
