@@ -378,7 +378,7 @@ describe("Tools and permissions", () => {
   });
 
   it("the prompt keeps the model from guessing what changed or why CI failed, and points it at the branch fields", () => {
-    const p = systemPrompt({ repo: "acme/app", now: new Date("2026-10-21T00:00:00Z"), economy: false, canPropose: true, locale: "en" });
+    const p = systemPrompt({ repo: "acme/app", now: new Date("2026-10-21T00:00:00Z"), economy: false, canPropose: true });
     expect(p).toMatch(/cannot see the code diff/);
     expect(p).toMatch(/never name a cause/i);
     expect(p).toMatch(/headBranch/);

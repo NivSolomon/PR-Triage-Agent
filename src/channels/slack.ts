@@ -11,7 +11,6 @@ import type { ActionRecord } from "../store/actions.js";
 import { renderDigest } from "../scheduler/digest.js";
 import { homeBlocks, homeDeniedBlocks } from "./slackHome.js";
 import { slackSafe } from "./slack-text.js";
-import { withChatDirection } from "../i18n/locale.js";
 import { count } from "../text/en.js";
 import { buildQueue } from "../triage/queue.js";
 import { decide, renderBudget, renderQueue, splitMessage } from "./shared.js";
@@ -19,6 +18,8 @@ import type { DecisionKind } from "./shared.js";
 
 /** Slack recommends keeping a message under ~4000 characters; a block's text is limited to 3000. */
 const MESSAGE_MAX = 3500;
+/** Shown while the agent runs, then deleted. Generic: the user may have said "hi", not asked about a PR. */
+export const THINKING_NOTE = "Thinking…";
 
 export const APPROVE_ACTION = "decision_approve";
 export const REJECT_ACTION = "decision_reject";
@@ -141,7 +142,7 @@ class BoltSlackApi implements SlackApi {
     const channel = await this.resolve(target);
     const res = await this.client.chat.postMessage({
       channel,
-      text: withChatDirection(slackSafe(text)), // LTR/RTL mark so English stays left-to-right even next to a Hebrew title
+      text: slackSafe(text),
       ...(opts.blocks ? { blocks: opts.blocks } : {}),
       ...(opts.threadTs ? { thread_ts: opts.threadTs } : {}),
       mrkdwn: false,
@@ -161,7 +162,7 @@ class BoltSlackApi implements SlackApi {
     await this.client.chat.update({
       channel: await this.resolve(channel),
       ts,
-      text: withChatDirection(slackSafe(text)),
+      text: slackSafe(text),
       blocks,
     });
   }
@@ -622,10 +623,10 @@ export class SlackChannel {
     const text = this.stripMention(p.text);
     if (text === "" || /^help$/i.test(text)) return post(helpText(this.isApprover(slackActor(p.userId), p.teamId)));
 
-    // A visible "working" note, replaced by the answer. Failing to show it must never block the answer.
+    // A visible "thinking" note, replaced by the answer. Failing to show it must never block the answer.
     let placeholder: string | undefined;
     try {
-      placeholder = (await api.post(p.channel, "Looking at the pull requests…", opts))?.ts;
+      placeholder = (await api.post(p.channel, THINKING_NOTE, opts))?.ts;
     } catch {
       placeholder = undefined;
     }

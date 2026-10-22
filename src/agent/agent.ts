@@ -6,8 +6,6 @@ import type { ChatMessage, LlmPort, ToolCall } from "./llm.js";
 import { checkGrounding, notFoundNumbers, numbersInToolOutput, stripNotFoundPrUrls } from "./grounding.js";
 import { toPlainText } from "./plain.js";
 import { t } from "../i18n/catalog.js";
-import { resolveLocale } from "../i18n/locale.js";
-import type { Locale } from "../i18n/locale.js";
 import { systemPrompt } from "./prompt.js";
 import { runTool, toolsFor } from "./tools.js";
 import type { ToolContext, ToolDeps } from "./tools.js";
@@ -32,8 +30,6 @@ export interface AskInput {
   githubLogin?: string;
   /** Counted separately in the budget log, e.g. "chat" or "digest". */
   purpose?: string;
-  /** UI language, used when the question itself has no language (a PR number, a slash command). */
-  locale?: Locale;
 }
 
 export interface AskResult {
@@ -65,10 +61,9 @@ export class Agent {
 
   async ask(input: AskInput): Promise<AskResult> {
     const text = input.text.trim();
-    const locale = resolveLocale(text, input.locale);
     if (text.length > MAX_INPUT_CHARS) {
       return {
-        text: t(locale, "agent.tooLong", { length: text.length, limit: MAX_INPUT_CHARS }),
+        text: t("agent.tooLong", { length: text.length, limit: MAX_INPUT_CHARS }),
         proposed: [],
         replaced: [],
         refusedBecause: "too_long",
@@ -81,8 +76,8 @@ export class Agent {
       return {
         text:
           gate.reason === "daily_limit"
-            ? t(locale, "agent.daily", { n: gate.message.match(/\d+/)?.[0] ?? "" })
-            : t(locale, "agent.budget"),
+            ? t("agent.daily", { n: gate.message.match(/\d+/)?.[0] ?? "" })
+            : t("agent.budget"),
         proposed: [],
         replaced: [],
         refusedBecause: gate.reason as "monthly_budget" | "daily_limit",
@@ -113,7 +108,7 @@ export class Agent {
 
     const prior = this.history.get(input.conversationId) ?? [];
     const messages: ChatMessage[] = [
-      { role: "system", content: systemPrompt({ repo: this.o.tools.github.repo, now: this.now(), economy, canPropose: input.canPropose, locale }) },
+      { role: "system", content: systemPrompt({ repo: this.o.tools.github.repo, now: this.now(), economy, canPropose: input.canPropose }) },
       ...prior,
       { role: "user", content: text },
     ];
@@ -138,7 +133,7 @@ export class Agent {
         });
 
         if (res.toolCalls.length === 0) {
-          answer = (res.content ?? "").trim() || t(locale, "agent.noAnswer");
+          answer = (res.content ?? "").trim() || t("agent.noAnswer");
           break;
         }
 
@@ -153,7 +148,7 @@ export class Agent {
     } catch (err) {
       console.error("LLM call failed:", err instanceof Error ? err.message : err);
       return {
-        text: t(locale, "agent.modelDown"),
+        text: t("agent.modelDown"),
         proposed,
         replaced,
         refusedBecause: "model_unavailable",
@@ -161,7 +156,7 @@ export class Agent {
     }
 
     const plain = toPlainText(
-      answer ?? t(locale, "agent.outOfSteps"),
+      answer ?? t("agent.outOfSteps"),
     );
     const grounding = checkGrounding(plain, fetched, text);
     if (grounding.ungrounded.length > 0) {

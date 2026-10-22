@@ -116,6 +116,12 @@ describe("public routes and headers", () => {
     expect(APP_JS).not.toMatch(/innerHTML|outerHTML|insertAdjacentHTML|document\.write/);
   });
 
+  it("send() does not shadow the i18n helper, so the first question actually fires", () => {
+    expect(APP_JS).toMatch(/var msg = \$\("text"\)\.value\.trim\(\)/);
+    expect(APP_JS).toMatch(/bubble\("bot typing", t\("chat.checking"\)\)/);
+    expect(APP_JS).not.toMatch(/function send\(\) \{\s*var t = /);
+  });
+
   it("the chat box caps questions at 2000 characters and does not silently drop Confirm", () => {
     expect(INDEX_HTML).toMatch(/id="text"[^>]*maxlength="2000"/);
     expect(APP_JS).toMatch(/CHAT_MAX = 2000/);
@@ -124,13 +130,14 @@ describe("public routes and headers", () => {
     expect(APP_JS).toMatch(/stay armed until they confirm or Cancel/);
   });
 
-  it("keeps the chat after an idle 401, confirms Reject, ignores IME Enter, and can switch to Hebrew", () => {
+  it("keeps the chat after an idle 401, confirms Reject, and ignores IME Enter", () => {
     expect(APP_JS).toMatch(/session.expired/);
     expect(APP_JS).not.toMatch(/if \(path !== "\/api\/login"\) signOut\(false\)/);
     expect(APP_JS).toMatch(/armedKind === "reject"/);
     expect(APP_JS).toMatch(/e.isComposing/);
     expect(APP_JS).toMatch(/refreshIfStale\(\);/);
-    expect(INDEX_HTML).toMatch(/id="lang"/);
+    expect(INDEX_HTML).not.toMatch(/id="lang"/);
+    expect(APP_JS).not.toMatch(/"he"/);
     expect(APP_JS).toMatch(/var I18N = /);
   });
 });

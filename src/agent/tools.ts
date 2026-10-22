@@ -278,7 +278,6 @@ export function userGaveCommentIntent(text: string): boolean {
   if (/["“”«»].{2,}["“”«»]/.test(t)) return true;
   if (/\b(ask|asking|tell|telling|remind|nudge|say|saying|write that|post that|comment that)\b/i.test(t)) return true;
   if (/(?:write|post|comment|leave)\s*:\s*\S/i.test(t)) return true;
-  if (/תבקש|לבקש|תגיד|להגיד|תזכיר|לתקן|\bתקן\b/.test(t)) return true;
   return false;
 }
 

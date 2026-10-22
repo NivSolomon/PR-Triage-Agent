@@ -40,7 +40,7 @@ Design reasoning, trade-offs, cost estimate, evals and the answers to the unders
 
 ### The web page
 
-One page with no build step, in light or dark theme and English or Hebrew (buttons in the top bar), using only system fonts and no third-party requests.
+One page with no build step, in light or dark theme (a button in the top bar), using only system fonts and no third-party requests. The product is English-only.
 
 - **Review queue:** summary tiles by state (click one to filter), search, confidence, author and sort filters, "only with warnings" and "hide drafts". Each PR is a card that expands to show a score breakdown (a waterfall from 50 to the final score, one bar per signal with the fact behind it), a confidence meter, and a button that opens the PR on GitHub. **Expand all / Collapse all** is available.
 - **Ask the agent:** a side drawer opened by the floating button at the bottom right. It closes with the **Close** button, **Esc**, or a click anywhere outside it. Questions are capped at 2000 characters (the box shows a counter). An idle session that expires does not wipe the chat: sign in again and continue. Answers are laid out as readable sections (the recommendation, then the PRs with their reasons and links), not one block of text.

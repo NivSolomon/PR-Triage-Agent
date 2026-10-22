@@ -13,6 +13,7 @@ import {
   incomingEditedMention,
   slackActor,
   slackSafe,
+  THINKING_NOTE,
 } from "../src/channels/slack.js";
 import type { SlackApi } from "../src/channels/slack.js";
 import type { ActionRecord } from "../src/store/actions.js";
@@ -282,11 +283,19 @@ describe("direct messages and mentions", () => {
       expect.objectContaining({ text: expect.stringMatching(/^(?!.*<@U0BOT>).*why is #7 blocked\?$/), actor: "slack:U0ALICE" }),
     );
     expect(s.posts.every((p) => p.channel === "C0TEAM" && p.opts?.threadTs === "111.222")).toBe(true);
+    expect(s.posts.map((p) => p.text)).toContain(THINKING_NOTE);
     expect(s.posts.map((p) => p.text)).toContain("Review #7 first.");
     expect(s.removed).toEqual([["C0TEAM", "ts1"]]); // the placeholder
     expect(s.agent.ask).toHaveBeenCalledWith(
       expect.objectContaining({ conversationId: "slack:C0TEAM:111.222:U0ALICE" }),
     );
+  });
+
+  it("the thinking note is generic, not 'looking at pull requests'", async () => {
+    const s = setup();
+    await s.channel.handleMessage({ userId: "U0ALICE", channel: "D0ALICE", text: "hi" });
+    expect(s.posts[0]?.text).toBe(THINKING_NOTE);
+    expect(s.posts[0]?.text).not.toMatch(/pull request/i);
   });
 
   it("does not share a channel-thread conversation between two people", async () => {

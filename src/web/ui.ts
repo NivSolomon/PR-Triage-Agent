@@ -5,7 +5,7 @@
  * template placeholders and backslashes on purpose because it lives inside a TypeScript template string.
  * Catalog JSON is interpolated once at load time (not by the browser script).
  */
-import { EN, HE } from "../i18n/catalog.js";
+import { EN } from "../i18n/catalog.js";
 
 export const INDEX_HTML = `<!doctype html>
 <html lang="en">
@@ -258,11 +258,6 @@ export const INDEX_HTML = `<!doctype html>
   .backdrop { display: none; position: fixed; inset: 0; z-index: 25; background: transparent; }
   .backdrop.open { display: block; }
   @media (max-width: 960px) { .backdrop.open { background: rgba(15,23,42,.45); } }
-  html[dir="rtl"] .fab { right: auto; left: 22px; }
-  html[dir="rtl"] .drawer { right: auto; left: 0; border-left: 0; border-right: 1px solid var(--line); box-shadow: 10px 0 30px rgba(15,23,42,.18); transform: translateX(-105%); }
-  html[dir="rtl"] .drawer.open { transform: none; }
-  html[dir="rtl"] .pr { border-left-width: 1px; border-right: 4px solid var(--tone); }
-  html[dir="rtl"] .rich ul, html[dir="rtl"] .rich ol, html[dir="rtl"] .guide-sec ul { padding-left: 0; padding-right: 20px; }
   #chat { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; padding: 2px; }
   .chat-empty { margin: auto; text-align: center; color: var(--muted); font-size: 14px; padding: 12px; }
   .chat-empty b { display: block; color: var(--fg); font-size: 16px; margin-bottom: 4px; }
@@ -375,7 +370,6 @@ export const INDEX_HTML = `<!doctype html>
     <div class="brand"><span class="logo" data-icon="pr"></span> <span data-i18n="brand">PR Triage Agent</span></div>
     <span class="muted" id="repo"></span>
     <span class="spacer"></span>
-    <button class="ghost" id="lang" title="Language">עב</button>
     <button class="ghost" id="theme" title="Switch between light and dark">Dark mode</button>
     <div id="userbar" class="hidden" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
       <span class="budget" id="budget"></span>
@@ -516,12 +510,9 @@ export const INDEX_HTML = `<!doctype html>
 
 export const APP_JS = `
 (function () {
-  var I18N = ${JSON.stringify({ en: EN, he: HE })};
-  var locale = "en";
-  try { var savedLang = localStorage.getItem("lang"); if (savedLang === "he" || savedLang === "en") locale = savedLang; } catch (eLang) {}
+  var I18N = ${JSON.stringify(EN)};
   function t(key, vars) {
-    var table = I18N[locale] || I18N.en;
-    var s = table[key] || I18N.en[key] || key;
+    var s = I18N[key] || key;
     if (!vars) return s;
     return s.replace(/\{([a-zA-Z0-9_]+)\}/g, function (whole, name) {
       return Object.prototype.hasOwnProperty.call(vars, name) ? String(vars[name]) : whole;
@@ -910,14 +901,14 @@ export const APP_JS = `
   }
 
   function send() {
-    var t = $("text").value.trim();
-    if (!t || $("send").disabled) return;
-    if (t.length > CHAT_MAX) { toast(t("chat.tooLong", { limit: CHAT_MAX }), "bad"); return; }
+    var msg = $("text").value.trim();
+    if (!msg || $("send").disabled) return;
+    if (msg.length > CHAT_MAX) { toast(t("chat.tooLong", { limit: CHAT_MAX }), "bad"); return; }
     if (!chatIsOpen()) openChat();
     $("send").disabled = true;
-    bubble("me", t); $("text").value = ""; updateTextCount();
+    bubble("me", msg); $("text").value = ""; updateTextCount();
     var wait = bubble("bot typing", t("chat.checking"));
-    api("/api/chat", { method: "POST", body: JSON.stringify({ text: t, conversationId: conv }) })
+    api("/api/chat", { method: "POST", body: JSON.stringify({ text: msg, conversationId: conv }) })
       .then(function (r) { finishBot(wait, r.text); loadActions(); loadBudget(); })
       .catch(function (e) { wait.className = "bubble bot err"; wait.textContent = t("chat.sorry", { error: e.message }); })
       .then(function () {
@@ -1764,8 +1755,6 @@ export const APP_JS = `
     setBtn($("clearFilters"), "clear", t("queue.clear"));
     $("loginBtn").textContent = t("login.signIn");
     $("theme").setAttribute("title", t("theme.title"));
-    $("lang").textContent = locale === "he" ? t("lang.en") : t("lang.he");
-    $("lang").setAttribute("title", t("lang.title"));
     $("guideBtn").setAttribute("title", t("guide.btnTitle"));
     $("search").setAttribute("placeholder", t("queue.search"));
     $("search").setAttribute("aria-label", t("queue.searchAria"));
@@ -1785,8 +1774,6 @@ export const APP_JS = `
     STATES.unclear.label = t("state.unclear"); STATES.unclear.hint = t("state.unclear.hint");
   }
   function applyLang() {
-    document.documentElement.lang = locale === "he" ? "he" : "en";
-    document.documentElement.dir = locale === "he" ? "rtl" : "ltr";
     paintChrome();
     if (queueData) renderQueue();
     if (signedIn) renderActions();
@@ -1842,11 +1829,6 @@ export const APP_JS = `
     var next = currentTheme() === "dark" ? "light" : "dark";
     applyTheme(next);
     try { localStorage.setItem("theme", next); } catch (e) {}
-  };
-  $("lang").onclick = function () {
-    locale = locale === "he" ? "en" : "he";
-    try { localStorage.setItem("lang", locale); } catch (e) {}
-    applyLang();
   };
   applyLang();
   /* Already signed in (valid session cookie)? Go straight to the app; otherwise this just shows the login box. */
