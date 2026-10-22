@@ -368,3 +368,95 @@ describe("buildQueue", () => {
     expect(q.truncated).toBe(true);
   });
 });
+
+describe("assessPr: exact threshold boundaries", () => {
+  const weightOf = (a: ReturnType<typeof assessPr>, code: string) => a.signals.find((s) => s.code === code)?.weight;
+  const sized = (lines: number) => assessPr(pr({ additions: lines, deletions: 0, reviewableLines: null }), NOW);
+
+  it.each([
+    [149, "small"],
+    [150, "small"], // "at or below" 150 is small
+    [151, null],
+    [799, null],
+    [800, "large"], // "at or above" 800 is large
+    [801, "large"],
+  ])("%i changed lines gives the %s signal", (lines, code) => {
+    const a = sized(lines);
+    expect(a.signals.some((s) => s.code === "small")).toBe(code === "small");
+    expect(a.signals.some((s) => s.code === "large")).toBe(code === "large");
+  });
+
+  it("counts additions and deletions together", () => {
+    expect(assessPr(pr({ additions: 100, deletions: 50 }), NOW).signals.some((s) => s.code === "small")).toBe(true);
+    expect(assessPr(pr({ additions: 100, deletions: 51 }), NOW).signals.some((s) => s.code === "small")).toBe(false);
+  });
+
+  it.each([
+    [47.9, undefined],
+    [48, 1],
+    [95.9, 1],
+    [96, 2],
+    [143.9, 2],
+    [144, 3],
+    [24 * 60, 3], // capped at WEIGHTS.waitMax
+  ])("waiting %f hours gives a long-wait bonus of %s", (hours, bonus) => {
+    const a = assessPr(pr({ createdAt: hoursAgo(hours) }), NOW);
+    expect(weightOf(a, "long_wait")).toBe(bonus);
+    expect(bonus ?? 0).toBeLessThanOrEqual(WEIGHTS.waitMax);
+  });
+
+  it.each([
+    [167.9, false],
+    [168, true],
+    [24 * 30, true],
+  ])("no update for %f hours: stale is %s", (hours, stale) => {
+    const a = assessPr(pr({ updatedAt: hoursAgo(hours) }), NOW);
+    expect(a.signals.some((s) => s.code === "stale")).toBe(stale);
+  });
+
+  it("a draft never accumulates a wait bonus, however old it is", () => {
+    const a = assessPr(pr({ draft: true, createdAt: hoursAgo(24 * 30) }), NOW);
+    expect(a.signals.some((s) => s.code === "long_wait")).toBe(false);
+  });
+
+  it("is deterministic: the same PR and the same clock always give the same result", () => {
+    const input = pr({ createdAt: hoursAgo(100), reviews: [approval("a", "APPROVED", "abc")] });
+    expect(assessPr(input, NOW)).toEqual(assessPr(structuredClone(input), NOW));
+  });
+
+  it("never mutates the PR it is given", () => {
+    const input = pr({ reviews: [approval("a", "APPROVED", "abc")], requestedReviewers: ["lee"] });
+    const before = structuredClone(input);
+    assessPr(input, NOW);
+    expect(input).toEqual(before);
+  });
+});
+
+describe("assessPr: dates it cannot read", () => {
+  it("an unreadable 'last updated' is reported and lowers confidence, instead of silently looking recent", () => {
+    const a = assessPr(pr({ updatedAt: "not-a-date" }), NOW);
+    expect(a.unknowns.join(" ")).toMatch(/last updated/);
+    expect(a.confidence).toBe("medium");
+    expect(a.signals.some((s) => s.code === "stale")).toBe(false);
+    expect(Number.isInteger(a.score)).toBe(true);
+  });
+
+  it("an unreadable wait start is reported and lowers confidence, instead of silently counting as no wait", () => {
+    const a = assessPr(pr({ createdAt: "garbage" }), NOW);
+    expect(a.unknowns.join(" ")).toMatch(/started waiting/);
+    expect(a.confidence).toBe("medium");
+    expect(a.signals.some((s) => s.code === "long_wait")).toBe(false);
+    expect(Number.isInteger(a.score)).toBe(true);
+  });
+
+  it("a date in the future (clock skew) counts as zero, not as a negative wait", () => {
+    const a = assessPr(pr({ updatedAt: hoursAgo(-5), createdAt: hoursAgo(-5) }), NOW);
+    expect(a.unknowns).toEqual([]);
+    expect(a.signals.some((s) => s.code === "stale" || s.code === "long_wait")).toBe(false);
+  });
+
+  it("an unreadable date on a draft does not invent a wait problem (drafts have no wait clock)", () => {
+    const a = assessPr(pr({ draft: true, createdAt: "garbage" }), NOW);
+    expect(a.unknowns.join(" ")).not.toMatch(/started waiting/);
+  });
+});

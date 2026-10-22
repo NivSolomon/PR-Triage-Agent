@@ -110,8 +110,12 @@ export const WEIGHTS = {
   blocker: -2,
 } as const;
 
-function hoursBetween(fromIso: string, now: Date): number {
-  return Math.max(0, (now.getTime() - new Date(fromIso).getTime()) / HOUR);
+/** Hours since `fromIso` (never negative, so a clock-skewed future date counts as 0). Null when the date cannot be read. */
+function hoursBetween(fromIso: string, now: Date): number | null {
+  const from = new Date(fromIso).getTime();
+  // An unreadable date would otherwise become NaN, and every "NaN >= threshold" check is silently false.
+  if (Number.isNaN(from) || Number.isNaN(now.getTime())) return null;
+  return Math.max(0, (now.getTime() - from) / HOUR);
 }
 
 function describeAge(hours: number): string {
@@ -142,6 +146,10 @@ export function assessPr(pr: PrDetail, now: Date = new Date()): TriageAssessment
   if (pr.readySince === null && !pr.draft) {
     unknowns.push("Could not tell when it was marked ready for review, so the wait is counted from when it was opened.");
   }
+  // Dates we cannot read are reported, never silently counted as "no wait" or "recent activity".
+  const timesUnreadable = (waitingHours === null && !pr.draft) || idleHours === null;
+  if (waitingHours === null && !pr.draft) unknowns.push("Could not read when it started waiting, so the wait is not counted.");
+  if (idleHours === null) unknowns.push("Could not read when it was last updated, so staleness is not judged.");
 
   // An approval only counts for the code that was reviewed. A newer commit makes it stale.
   const approvals = pr.reviews.filter((r) => r.state === "APPROVED");
@@ -239,12 +247,12 @@ export function assessPr(pr: PrDetail, now: Date = new Date()): TriageAssessment
   }
 
   if (!pr.draft) {
-    if (waitingHours >= THRESHOLDS.longWaitHours) {
+    if (waitingHours !== null && waitingHours >= THRESHOLDS.longWaitHours) {
       const bonus = Math.min(WEIGHTS.waitMax, 1 + Math.floor((waitingHours - THRESHOLDS.longWaitHours) / 48));
       add("long_wait", `It has been waiting for review for ${describeAge(waitingHours)}.`, bonus);
     }
     // Idle for a long time is a prompt to decide, not a reason to rank it lower or higher.
-    if (idleHours >= THRESHOLDS.staleHours) {
+    if (idleHours !== null && idleHours >= THRESHOLDS.staleHours) {
       add("stale", `No activity for ${describeAge(idleHours)}; it may need a decision to close or revive it.`, 0);
     }
   }
@@ -272,7 +280,8 @@ export function assessPr(pr: PrDetail, now: Date = new Date()): TriageAssessment
     ciState === "none" ||
     pr.mergeableState === null ||
     pr.mergeableState === "unknown" ||
-    (pr.readySince === null && !pr.draft)
+    (pr.readySince === null && !pr.draft) ||
+    timesUnreadable
   ) {
     confidence = "medium";
   }
@@ -295,7 +304,7 @@ export function assessPr(pr: PrDetail, now: Date = new Date()): TriageAssessment
       ci: ciState,
       approvals: currentApprovals.length,
       mergeableState: pr.mergeableState,
-      staleDays: idleHours >= THRESHOLDS.staleHours ? Math.round(idleHours / 24) : 0,
+      staleDays: idleHours !== null && idleHours >= THRESHOLDS.staleHours ? Math.round(idleHours / 24) : 0,
     }),
   };
 }
