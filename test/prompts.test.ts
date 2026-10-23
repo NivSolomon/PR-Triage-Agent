@@ -48,6 +48,10 @@ describe("prompt bank", () => {
     expect(APP_JS).toMatch(/livePromptNumber/);
     expect(webPromptGroups().some((g) => g.items.some((i) => i.includes("Leave a comment")))).toBe(true);
     expect(webPromptGroups().every((g) => g.items.every((i) => !i.startsWith("/triage")))).toBe(true);
+    expect(PROMPT_BANK.some((g) => g.id === "hebrew")).toBe(false);
+    expect(JSON.stringify(webPromptGroups())).not.toMatch(/[\u0590-\u05FF]/);
+    expect(APP_JS).not.toMatch(/[\u0590-\u05FF]/);
+    expect(APP_JS).not.toMatch(/Hebrew/i);
   });
 
   it("fills the #12 stand-in with a blocked PR from the live queue when one exists", () => {

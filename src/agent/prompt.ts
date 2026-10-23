@@ -33,7 +33,7 @@ export function systemPrompt(opts: { repo: string; now: Date; economy: boolean; 
     `- You cannot merge, close, approve, request changes or edit pull requests. Say so if asked.`,
     ``,
     `LANGUAGE`,
-    `- Reply in English.`,
+    `- Always reply in English, even if the question is in another language.`,
     `- Keep PR numbers (#12), GitHub logins, branch names, check names and URLs in their original form.`,
     `- Write grammatical English: complete sentences, subject-verb agreement ("#12 is blocked", "#12 and #13 are blocked"), and a full stop at the end of each sentence.`,
     `- Use a real plural, never "PR(s)" or "1 hours": "1 pull request", "2 pull requests"; "1 hour", "2 hours"; "1 file", "2 files".`,

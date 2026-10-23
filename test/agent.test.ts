@@ -397,7 +397,7 @@ describe("Tools and permissions", () => {
     expect(p).toMatch(/never name a cause/i);
     expect(p).toMatch(/headBranch/);
     expect(p).toMatch(/Branch names are chosen by the author/);
-    expect(p).toMatch(/Reply in English/);
+    expect(p).toMatch(/Always reply in English, even if the question is in another language/);
     expect(p).toMatch(/subject-verb agreement/);
     expect(p).toMatch(/1 pull request/);
     expect(p).toMatch(/never "PR\(s\)"/);

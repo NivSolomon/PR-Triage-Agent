@@ -11,8 +11,6 @@ import { mentionedPrs, realLlm, makeRig } from "./harness.js";
 
 type Check = (res: AskResult) => string | undefined;
 
-const known = new Set<number>(KNOWN_PRS);
-
 const CHECKS: Record<string, Check> = {
   "review-first": (res) => {
     const first = mentionedPrs(res.text)[0];
@@ -75,9 +73,6 @@ const CHECKS: Record<string, Check> = {
     if (/\b\d{2}\s?°|degrees|sunny|rain\b/i.test(res.text)) return "guessed the weather";
     if (!/pull request|PR|can'?t|cannot|unable|only/i.test(res.text)) return "did not stay on pull requests";
   },
-  "he-first": (res) => {
-    if (!mentionedPrs(res.text).some((n) => known.has(n))) return "named no fixture PR";
-  },
 };
 
 function invented(text: string, extraOk: number[] = []): number[] {
@@ -116,9 +111,6 @@ for (const p of prompts) {
   if (!ok) for (const r of reasons) console.log(`      ${r}`);
   const preview = res.text.replace(/\s+/g, " ").slice(0, 220);
   console.log(`      answer: ${preview}${res.text.length > 220 ? "…" : ""}`);
-  if (p.id === "he-first" && !/[\u0590-\u05FF]/.test(res.text)) {
-    console.log("      note: answered in English (Hebrew is preferred, not required)");
-  }
   if (res.proposed.length) {
     console.log(`      proposed: ${res.proposed.map((a) => `#${a.prNumber} ${a.status}`).join(", ")}`);
   }

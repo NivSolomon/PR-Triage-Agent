@@ -163,18 +163,6 @@ export const PROMPT_BANK: PromptGroup[] = [
       },
     ],
   },
-  {
-    id: "hebrew",
-    title: "Hebrew (the agent answers in the language of the question)",
-    prompts: [
-      {
-        id: "he-first",
-        text: "מה כדאי לסקור קודם?",
-        channels: ["web", "slack"],
-        expect: "A Hebrew answer that still names a real PR and a link.",
-      },
-    ],
-  },
 ];
 
 /** Short list on Slack Home and in /triage help. */
