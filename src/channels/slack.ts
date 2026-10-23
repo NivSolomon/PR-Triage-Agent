@@ -530,7 +530,7 @@ export class SlackChannel {
 
   /**
    * Replace Approve / Reject buttons on every stored copy of these cards with the outcome.
-   * Used when a request is replaced, rejected, expired, or recovered after a crash — not only
+   * Used when a request is replaced, rejected, expired, or recovered after a crash - not only
    * when someone clicks the card that Slack delivered this event for.
    */
   async retireCards(records: ActionRecord[]): Promise<void> {

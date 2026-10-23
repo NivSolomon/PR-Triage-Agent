@@ -36,7 +36,7 @@ function report(title: string, checks: Check[]): boolean {
   let passed = 0;
   for (const c of checks) {
     const mark = c.ok ? "PASS" : "FAIL";
-    console.log(c.detail ? `  ${mark}  ${c.name} — ${c.detail}` : `  ${mark}  ${c.name}`);
+    console.log(c.detail ? `  ${mark}  ${c.name} - ${c.detail}` : `  ${mark}  ${c.name}`);
     if (c.ok) passed += 1;
   }
   console.log(`  ${passed}/${checks.length} passed`);
@@ -88,7 +88,7 @@ async function live(): Promise<boolean> {
   console.log("--------------------");
   console.log(
     `Spend for this check: ${s.requests} model request(s), $${s.spentUsd.toFixed(4)} ` +
-      `(fixture GitHub — no live GitHub calls).`,
+      `(fixture GitHub - no live GitHub calls).`,
   );
 
   const briefingOk = report("Live briefing", [

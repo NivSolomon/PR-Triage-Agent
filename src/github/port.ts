@@ -2,7 +2,7 @@ import type { PrDetail, PrSummary } from "./types.js";
 
 /**
  * Read-only GitHub surface. Queue, digest, chat, web and the agent's lookup tools
- * depend on this — they never post a comment.
+ * depend on this - they never post a comment.
  */
 export interface GitHubReader {
   readonly repo: string;

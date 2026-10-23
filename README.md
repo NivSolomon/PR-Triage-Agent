@@ -5,7 +5,7 @@ It can draft a public comment; **nothing is posted until a human approves that e
 
 **Live:** https://pr-triage-agent.fly.dev ([/healthz](https://pr-triage-agent.fly.dev/healthz)). Slack is the main channel; the web page uses a personal access key.
 
-Design, cost, evals and trade-offs: [`DECISIONS.md`](DECISIONS.md). Architecture: [`docs/architecture.pdf`](docs/architecture.pdf) ([`.drawio`](docs/architecture.drawio)).
+Design, cost, evals and trade-offs: [`DECISIONS.md`](DECISIONS.md). Architecture: [`docs/architecture.pdf`](docs/architecture.pdf).
 
 ## How to try it
 
@@ -22,7 +22,7 @@ Design, cost, evals and trade-offs: [`DECISIONS.md`](DECISIONS.md). Architecture
 
 **Slack:** `/triage`, DMs, and @mentions. Home is a short guide (same rules as the web Guide).
 
-**Web:** one page — ranked queue (state tiles, search, score breakdown), a chat drawer, pending/history approvals, and digest status. Light/dark theme. English only.
+**Web:** one page - ranked queue (state tiles, search, score breakdown), a chat drawer, pending/history approvals, and digest status. Light/dark theme. English only.
 
 ## Slack setup (once)
 
@@ -38,17 +38,15 @@ If the app is already installed, paste the updated manifest and **reinstall**. C
 
 ## Local development
 
-```bash
-npm install
-cp .env.example .env     # fill in values (.env is git-ignored)
-npm run typecheck
-npm test                 # unit tests: no network, no API cost
-npm run evals            # behaviour evals; needs LLM_API_KEY, a few cents
-npm run prompts          # prompt bank against the fixture agent
-npm run dev
-```
+Needs Node 22.5+ (built-in `node:sqlite`).
 
-Node 22.5+ (built-in `node:sqlite`).
+1. Install dependencies: `npm install`
+2. Copy [`.env.example`](.env.example) to `.env` (git-ignored) and fill in the values.
+3. Check types: `npm run typecheck`
+4. Run unit tests (no network, no API cost): `npm test`
+5. Optional - behaviour evals (needs `LLM_API_KEY`, a few cents): `npm run evals`
+6. Optional - prompt bank against the fixture agent: `npm run prompts`
+7. Start the app: `npm run dev`
 
 ## Environment
 
@@ -82,25 +80,45 @@ node -e "console.log(require('crypto').randomBytes(24).toString('hex'))"
 
 ## Deployment
 
-One container, one SQLite volume, **one instance** (Slack + scheduler must not run twice).
+One container, one SQLite volume, **one instance** - Slack and the scheduler must not run twice.
 
-```bash
-fly launch --no-deploy --copy-config
-fly volumes create agent_data --size 1 --region fra
-fly secrets set \
-  GITHUB_TOKEN=... GITHUB_REPO=owner/repo \
-  LLM_API_KEY=... \
-  SLACK_BOT_TOKEN=xoxb-... SLACK_APP_TOKEN=xapp-... \
-  SLACK_ALLOW_ALL_MEMBERS=true SLACK_APPROVER_USER_IDS=U01AAAAAA \
-  WEB_USERS='{"you":{"key":"<key-1>","role":"approver"},"tester":{"key":"<key-2>","role":"reader"}}' \
-  MCP_TOKENS='{"<token-1>":"reader","<token-2>":"proposer"}'
-fly deploy
-fly status && curl https://<your-app>.fly.dev/healthz
-```
+### First time on Fly.io
 
-CI (`.github/workflows/ci.yml`) typechecks and tests on PRs and `main`. After CI on `main`, `deploy.yml` runs `fly deploy` and rolls back if `/healthz` fails. Set repo secret `FLY_API_TOKEN` (`fly tokens create deploy`). Runtime secrets stay in `fly secrets`. Evals are run by hand (`npm run evals`).
+1. Create the app from this repo’s `fly.toml` (do not deploy yet):
+   `fly launch --no-deploy --copy-config`
+2. Create a 1 GB volume in `fra` for the SQLite file:
+   `fly volumes create agent_data --size 1 --region fra`
+3. Set runtime secrets (never put these in `fly.toml`). Generate web/MCP keys with the command in [Environment](#environment).
 
-After deploy: `/healthz` is `{"ok":true}`; `/triage help` and `/triage budget` answer; a proposed comment shows a card and does not appear on GitHub until approved.
+   ```bash
+   fly secrets set \
+     GITHUB_TOKEN=... GITHUB_REPO=owner/repo \
+     LLM_API_KEY=... \
+     SLACK_BOT_TOKEN=xoxb-... SLACK_APP_TOKEN=xapp-... \
+     SLACK_ALLOW_ALL_MEMBERS=true SLACK_APPROVER_USER_IDS=U01AAAAAA \
+     WEB_USERS='{"you":{"key":"<key-1>","role":"approver"},"tester":{"key":"<key-2>","role":"reader"}}' \
+     MCP_TOKENS='{"<token-1>":"reader","<token-2>":"proposer"}'
+   ```
+
+4. Deploy: `fly deploy`
+5. Confirm the machine is up: `fly status`
+6. Confirm the health check: `curl https://<your-app>.fly.dev/healthz` - expect `{"ok":true}`
+
+Later deploys are just step 4 (`fly deploy`), or a push to `main` once CI/CD is connected.
+
+### After it is up
+
+1. In Slack, `/triage help` answers and `/triage budget` shows the AI budget.
+2. Ask for a comment on a PR: an approval card appears, and nothing is on GitHub yet.
+3. Approve the card: the comment appears on the pull request.
+
+### Later: deploy from GitHub Actions
+
+1. Create a deploy token: `fly tokens create deploy`
+2. Add it as the repo secret `FLY_API_TOKEN` (GitHub → Settings → Secrets → Actions). Runtime secrets stay in `fly secrets`.
+3. Push to `main`. `.github/workflows/ci.yml` typechecks and tests; if that passes, `deploy.yml` runs `fly deploy` and rolls back if `/healthz` fails.
+
+Evals are not in CI (`npm run evals` costs money). Run them by hand.
 
 ## Layout
 

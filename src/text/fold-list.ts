@@ -84,7 +84,7 @@ export function composeRankedView(parts: RankedParts, from: number, count: numbe
   return { text: blocks.filter(Boolean).join("\n\n"), remaining, shown };
 }
 
-/** Short "show the next chunk" replies — not "tell me more about #8". */
+/** Short "show the next chunk" replies - not "tell me more about #8". */
 export function isMoreRequest(text: string): boolean {
   const t = text.trim().toLowerCase();
   return /^(show\s+)?more(\s+(prs?|please|of them))?$/.test(t) || t === "next" || t === "continue";

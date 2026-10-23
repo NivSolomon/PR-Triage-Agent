@@ -81,7 +81,7 @@ const TOOLS: ToolHandler[] = [
       description:
         "Get one pull request in detail: its triage assessment plus reviews, CI checks and recent comments. " +
         "Use it when asked about a specific PR number. A closed PR is returned as closed:true with no " +
-        "review assessment — it is not on the open queue. A missing number is notFound.",
+        "review assessment - it is not on the open queue. A missing number is notFound.",
       parameters: {
         type: "object",
         properties: { number: { type: "integer", minimum: 1, description: "Pull request number." } },

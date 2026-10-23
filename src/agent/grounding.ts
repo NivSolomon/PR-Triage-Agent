@@ -7,7 +7,7 @@
  * such as "CI passed"; those are covered by the evals and by the tools returning "unknown" for gaps.
  */
 
-/** "#3", "PR 3", "PR#3", "pull request 3" — people type all of these. */
+/** "#3", "PR 3", "PR#3", "pull request 3" - people type all of these. */
 const PR_REF = /#(\d{1,6})\b|\b(?:pull[\s-]?request|pr)[\s#:]*(\d{1,6})\b/gi;
 
 export function mentionedNumbers(text: string): number[] {
@@ -49,7 +49,7 @@ export interface GroundingResult {
   text: string;
 }
 
-/** Trailing copy of our own warning — the model sometimes repeats the last answer. */
+/** Trailing copy of our own warning - the model sometimes repeats the last answer. */
 const GROUNDING_WARNING =
   /\n\nWarning: I mentioned #[\s\S]*?(?:or ask me again\.)\s*$/;
 

@@ -67,7 +67,7 @@ It helped with typed config, GitHub validation, SQLite, and failure cases I woul
 
 It was wrong when:
 1. An MCP role was named `approver`. An MCP client must never approve its own proposal. Renamed to `proposer`; config rejects `approver`.
-2. The prompt said "plain text"; the model sent Markdown. A prompt is not a guarantee — `toPlainText` in code.
+2. The prompt said "plain text"; the model sent Markdown. A prompt is not a guarantee - `toPlainText` in code.
 3. The model chose `limit: 5` and silently dropped #106. The system now owns the limit and reports `moreOpenPrsNotShown`.
 4. Live, it guessed a change was "an informative comment" and blamed CI on "a test issue" with no diff or logs. The first 12 evals had all passed because none asked a question the data cannot answer about a PR that exists. Prompt + PR tool fixed; evals 13–14 added.
 5. Blank `KEY=` in a copied `.env` crashed startup. Tests never used a copied file. Blank now means unset.
@@ -111,5 +111,5 @@ Not built: a "this was wrong" button, and a weekly sample of five answers vs Git
 **3. Which part am I least confident in, and why?**
 
 1. **Scoring weights.** In-band numbers (e.g. +2 for small) are my judgement. They order the fixture well; they have not been measured on this team's PRs.
-2. **Evals.** Fact/behaviour checks on one model — a sanity check, not a reliability score.
+2. **Evals.** Fact/behaviour checks on one model - a sanity check, not a reliability score.
 3. **Slack Connect.** Refusing another workspace is unit-tested. Testers join with an invite, so that path is not on the live tester route, and I have not sat in a real shared channel.

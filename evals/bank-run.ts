@@ -87,7 +87,7 @@ function invented(text: string, extraOk: number[] = []): number[] {
 
 const prompts = PROMPT_BANK.flatMap((g) => g.prompts.filter((p) => p.auto !== false));
 
-console.log("Prompt bank — automatic run (fixture repo acme/app, no live GitHub writes)\n");
+console.log("Prompt bank - automatic run (fixture repo acme/app, no live GitHub writes)\n");
 
 if (!process.env.LLM_API_KEY) {
   console.error("LLM_API_KEY is missing. Set it in .env.");
@@ -125,7 +125,7 @@ for (const p of prompts) {
   console.log("");
 }
 
-console.log("Slack commands — type these in Slack (no model, not run here)\n");
+console.log("Slack commands - type these in Slack (no model, not run here)\n");
 for (const [cmd, d] of SLACK_COMMANDS) {
   console.log(`  ${cmd}`);
   console.log(`      ${d}`);

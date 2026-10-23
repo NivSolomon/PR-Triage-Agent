@@ -8,7 +8,7 @@ import { count } from "../text/en.js";
 
 const TOP_N = 3;
 
-/** "Fri 23 Oct, 08:30" — the same clock the schedule uses, not a raw UTC ISO string. */
+/** "Fri 23 Oct, 08:30" - the same clock the schedule uses, not a raw UTC ISO string. */
 export function formatDigestClock(iso: string, timeZone?: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
