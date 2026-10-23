@@ -1,4 +1,4 @@
-﻿/** Replace `{name}` placeholders. Unknown names are left as-is so a missing var is visible. */
+/** Replace `{name}` placeholders. Unknown names are left as-is so a missing var is visible. */
 export function interpolate(template: string, vars?: Record<string, string | number>): string {
   if (!vars) return template;
   return template.replace(/\{(\w+)\}/g, (whole, name: string) =>
@@ -100,6 +100,8 @@ export const EN = {
   "author.any": "Any author",
   "sort.aria": "Sort",
   "digest.title": "Scheduled digest",
+  "digest.show": "Show",
+  "digest.hide": "Hide",
   "digest.note": "The weekday morning briefing. Built from the ranked queue, so it uses no AI credit.",
   "digest.runs": "Schedule",
   "digest.runsHint": "Setting (DIGEST_CRON): {cron}",

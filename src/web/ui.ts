@@ -97,6 +97,8 @@ export const INDEX_HTML = `<!doctype html>
   .sec-head { display: flex; align-items: center; gap: 10px; padding: 14px 16px 0; flex-wrap: wrap; }
   .sec-head h2 { margin: 0; font-size: 16px; }
   .sec-body { padding: 12px 16px 16px; }
+  #digestPanel .sec-head { cursor: pointer; }
+  #digestPanel.folded .sec-head { padding-bottom: 14px; }
 
   /* scheduled digest: structured last message, not a raw dump */
   .digest-lead { margin: 0 0 12px; }
@@ -476,12 +478,14 @@ export const INDEX_HTML = `<!doctype html>
   </div>
 
   <div class="col">
-    <section class="panel hidden" id="digestPanel">
-      <div class="sec-head">
+    <section class="panel hidden folded" id="digestPanel">
+      <div class="sec-head" id="digestHead">
         <h2 data-icon="clock"><span data-i18n="digest.title">Scheduled digest</span></h2>
         <span class="chip" id="digestChip"></span>
+        <span class="spacer"></span>
+        <button class="small" id="digestToggle" type="button" aria-expanded="false" aria-controls="digestBody">Show</button>
       </div>
-      <div class="sec-body">
+      <div class="sec-body hidden" id="digestBody">
         <p class="muted digest-lead" data-i18n="digest.note">The weekday morning briefing. Built from the ranked queue, so it uses no AI credit.</p>
         <div class="digest-stats" id="digestMeta"></div>
         <div class="digest-msg" id="digestMsg"></div>
@@ -1088,6 +1092,24 @@ export const APP_JS = `
 
   /* ---------- scheduled digest: read-only proof that the schedule ran ---------- */
   var digestRuns = [];
+  /* Starts folded so the last message does not fill the right column. Remembered for this tab. */
+  var digestOpen = false;
+  try { digestOpen = sessionStorage.getItem("digestOpen") === "1"; } catch (e) {}
+  function applyDigestFold() {
+    var panel = $("digestPanel");
+    var body = $("digestBody");
+    var btn = $("digestToggle");
+    if (!panel || !body || !btn) return;
+    panel.classList.toggle("folded", !digestOpen);
+    body.classList.toggle("hidden", !digestOpen);
+    btn.setAttribute("aria-expanded", digestOpen ? "true" : "false");
+    setBtn(btn, digestOpen ? "collapse" : "expand", digestOpen ? t("digest.hide") : t("digest.show"));
+  }
+  function setDigestOpen(open) {
+    digestOpen = !!open;
+    try { sessionStorage.setItem("digestOpen", digestOpen ? "1" : "0"); } catch (e) {}
+    applyDigestFold();
+  }
   /* "Friday 23 Oct, 08:30" in the schedule's own time zone, 24-hour clock, built from parts so the shape never varies by browser. */
   function when(iso, tz) {
     var d = new Date(iso);
@@ -1114,6 +1136,7 @@ export const APP_JS = `
     var panel = $("digestPanel");
     if (!d || !d.enabled) { panel.classList.add("hidden"); return; }
     panel.classList.remove("hidden");
+    applyDigestFold();
     digestRuns = d.runs || [];
     var last = digestRuns[0];
     var chip = $("digestChip");
@@ -1985,6 +2008,7 @@ export const APP_JS = `
     setBtn($("newChat"), "plus", t("chat.new"));
     setBtn($("closeChat"), "x", t("chat.close"));
     setBtn($("clearFilters"), "clear", t("queue.clear"));
+    applyDigestFold();
     $("loginBtn").textContent = t("login.signIn");
     $("theme").setAttribute("title", t("theme.title"));
     $("guideBtn").setAttribute("title", t("guide.btnTitle"));
@@ -2046,6 +2070,10 @@ export const APP_JS = `
   $("fWarn").onchange = function (e) { f.warn = e.target.checked; renderQueue(); };
   $("fHideDrafts").onchange = function (e) { f.hideDrafts = e.target.checked; renderQueue(); };
   $("clearFilters").onclick = function () { f = newFilters(); $("search").value = ""; renderQueue(); };
+  $("digestHead").onclick = function (e) {
+    if (e.target && e.target.closest && e.target.closest("button") && e.target.closest("button").id !== "digestToggle") return;
+    setDigestOpen(!digestOpen);
+  };
   $("toggleAll").onclick = function () {
     var cards = document.querySelectorAll("#queue .pr");
     var allOpen = cards.length > 0 && document.querySelectorAll("#queue .pr.open").length === cards.length;

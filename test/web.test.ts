@@ -577,8 +577,10 @@ describe("scheduled digest status", () => {
 
   it("the page shows it with text only, and refreshes it from the local database", () => {
     expect(INDEX_HTML).toContain('id="digestPanel"');
-    expect(INDEX_HTML).toContain('id="digestMsg"');
+    expect(INDEX_HTML).toContain('id="digestBody"');
+    expect(INDEX_HTML).toContain('id="digestToggle"');
     expect(APP_JS).toMatch(/api\("\/api\/digest"\)/);
+    expect(APP_JS).toMatch(/setDigestOpen/);
     expect(APP_JS).toMatch(/paintDigestMessage\(/);
     expect(APP_JS).not.toMatch(/innerHTML|outerHTML|insertAdjacentHTML|document\.write/);
   });
