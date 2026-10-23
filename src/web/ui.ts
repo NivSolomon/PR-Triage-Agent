@@ -98,6 +98,36 @@ export const INDEX_HTML = `<!doctype html>
   .sec-head h2 { margin: 0; font-size: 16px; }
   .sec-body { padding: 12px 16px 16px; }
 
+  /* scheduled digest: structured last message, not a raw dump */
+  .digest-lead { margin: 0 0 12px; }
+  .digest-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 14px; }
+  .digest-stat { padding: 10px 12px; border-radius: 10px; background: var(--soft); min-width: 0; }
+  .digest-stat span { display: block; font-size: 11px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; margin-bottom: 3px; }
+  .digest-stat b { display: block; font-size: 13px; font-weight: 600; line-height: 1.35; overflow-wrap: anywhere; }
+  .digest-msg { display: grid; gap: 10px; }
+  .digest-head { padding: 10px 12px; border-radius: 10px; background: var(--soft); }
+  .digest-kicker { font-weight: 700; font-size: 14px; }
+  .digest-when { font-size: 13px; color: var(--muted); margin: 2px 0 0; }
+  .digest-sec { border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+  .digest-sec h3 { margin: 0; padding: 8px 12px; font-size: 13px; font-weight: 700; background: var(--soft); color: var(--muted); display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .digest-sec.review h3 { background: var(--accent-soft); color: var(--accent); }
+  .digest-sec.merge h3 { background: var(--ok-bg); color: var(--ok); }
+  .digest-sec.blocked h3 { background: var(--warn-bg); color: var(--warn); }
+  .digest-sec.unclear h3, .digest-sec.fail h3 { background: var(--bad-bg); color: var(--bad); }
+  .digest-sec.idle { border-style: dashed; }
+  .digest-row { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border-top: 1px solid var(--line); }
+  .digest-row .num { flex: none; margin-top: 1px; }
+  .digest-row .body { flex: 1; min-width: 0; font-weight: 600; line-height: 1.35; }
+  .digest-row .why { font-size: 13px; font-weight: 400; color: var(--muted); margin-top: 3px; }
+  .digest-row.tight { padding: 7px 12px; align-items: center; }
+  .digest-row.tight .body { font-weight: 500; }
+  .digest-note { font-size: 13px; color: var(--muted); padding: 8px 12px; border-top: 1px solid var(--line); }
+  .digest-empty { padding: 12px; color: var(--muted); }
+  .digest-foot { font-size: 13px; color: var(--muted); padding: 2px 4px; }
+  .digest-runs { margin-top: 14px; display: grid; gap: 6px; }
+  .digest-run { display: flex; gap: 8px; align-items: center; }
+  @media (max-width: 560px) { .digest-stats { grid-template-columns: 1fr; } }
+
   /* queue */
   .toolbar { display: grid; gap: 10px; margin-bottom: 12px; }
   .tool-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
@@ -442,7 +472,7 @@ export const INDEX_HTML = `<!doctype html>
         </div>
         <div id="queue"><div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div></div>
       </div>
-    </section>
+  </section>
   </div>
 
   <div class="col">
@@ -450,13 +480,12 @@ export const INDEX_HTML = `<!doctype html>
       <div class="sec-head">
         <h2 data-icon="clock"><span data-i18n="digest.title">Scheduled digest</span></h2>
         <span class="chip" id="digestChip"></span>
-        <span class="spacer"></span>
-        <button class="small" id="digestToggle">Show last message</button>
       </div>
       <div class="sec-body">
-        <div class="muted" id="digestMeta"></div>
-        <pre class="hidden" id="digestText" style="margin-top:10px;max-height:260px;overflow:auto"></pre>
-        <div id="digestRuns" style="margin-top:10px"></div>
+        <p class="muted digest-lead" data-i18n="digest.note">The weekday morning briefing. Built from the ranked queue, so it uses no AI credit.</p>
+        <div class="digest-stats" id="digestMeta"></div>
+        <div class="digest-msg" id="digestMsg"></div>
+        <div class="digest-runs" id="digestRuns"></div>
       </div>
     </section>
     <section class="panel">
@@ -470,7 +499,7 @@ export const INDEX_HTML = `<!doctype html>
       <div class="sec-body">
         <div class="muted" style="margin-bottom:10px" data-i18n="approvals.note">Nothing is posted to GitHub until an approver approves the exact text shown.</div>
         <div class="tabs" id="actTabs" role="tablist"></div>
-        <div id="actions"></div>
+  <div id="actions"></div>
       </div>
     </section>
   </div>
@@ -488,7 +517,7 @@ export const INDEX_HTML = `<!doctype html>
     <span class="spacer"></span>
     <button class="ghost small" id="newChat" title="Start a fresh conversation">New chat</button>
     <button class="ghost small" id="closeChat" aria-label="Close chat">Close</button>
-  </div>
+</div>
   <div class="drawer-body">
     <div id="chat" aria-live="polite"></div>
   </div>
@@ -938,7 +967,20 @@ export const APP_JS = `
     col.parentNode.scrollIntoView({ block: "start", behavior: "smooth" });
   }
 
-  function usePrompt(s) { $("text").value = s; send(); }
+  function livePromptNumber() {
+    var items = queueData && queueData.items ? queueData.items : [];
+    var i;
+    for (i = 0; i < items.length; i++) {
+      if (items[i].state === "waiting_on_author") return items[i].number;
+    }
+    return 0;
+  }
+  function fillPrompt(s) {
+    var n = livePromptNumber();
+    if (n && s.indexOf("#12") >= 0) return s.split("#12").join("#" + n);
+    return s;
+  }
+  function usePrompt(s) { $("text").value = fillPrompt(s); send(); }
 
   function renderSuggestions() {
     var box = $("suggest"); clear(box);
@@ -1069,55 +1111,159 @@ export const APP_JS = `
     var last = digestRuns[0];
     var chip = $("digestChip");
     chip.className = "chip " + (last ? (last.ok ? "ok" : "bad") : "");
-    chip.textContent = last ? (last.ok ? "Last run worked" : "Last run failed") : "No run yet";
+    chip.textContent = last ? (last.ok ? t("digest.worked") : t("digest.failed")) : t("digest.noRun");
 
     var meta = $("digestMeta"); clear(meta);
-    var line = function (label, value, bad, hint) {
-      var row = el("div", "");
-      if (bad) row.style.color = "var(--bad)";
-      if (hint) row.title = hint;
-      row.appendChild(el("strong", "", label + ": "));
-      row.appendChild(document.createTextNode(value));
-      meta.appendChild(row);
+    var stat = function (label, value, hint, bad) {
+      var box = el("div", "digest-stat");
+      if (hint) box.title = hint;
+      box.appendChild(el("span", "", label));
+      var v = el("b", "", value);
+      if (bad) v.style.color = "var(--bad)";
+      box.appendChild(v);
+      meta.appendChild(box);
     };
-    /* Hover shows the raw cron expression, for anyone who wants the exact setting. */
-    line("Runs", (d.schedule || d.cron) + ", " + d.timezone + " time", false, "Setting (DIGEST_CRON): " + d.cron);
-    line("Next run", d.nextRun ? when(d.nextRun, d.timezone) + " (" + rel(d.nextRun) + ")" : "not scheduled");
-    line("Sent to", d.target);
+    stat(t("digest.runs"), t("digest.tz", { schedule: d.schedule || d.cron, timezone: d.timezone }), t("digest.runsHint", { cron: d.cron }));
+    stat(t("digest.next"), d.nextRun ? when(d.nextRun, d.timezone) + " (" + rel(d.nextRun) + ")" : t("digest.nextNone"));
+    stat(t("digest.sent"), d.target);
     if (last) {
-      line("Last run", when(last.startedAt, d.timezone) + " (" + rel(last.startedAt) + ")");
-      if (!last.ok) line("What went wrong", last.error || "unknown", true);
+      stat(t("digest.last"), when(last.startedAt, d.timezone) + " (" + rel(last.startedAt) + ")");
+      if (!last.ok) stat(t("digest.problem"), last.error || t("digest.unknown"), "", true);
     } else {
-      line("Last run", "none yet. Each run is recorded here after it happens.");
+      stat(t("digest.last"), t("digest.lastNone"));
     }
 
-    var pre = $("digestText");
-    pre.textContent = last && last.text ? last.text : "Nothing was sent.";
-    var btn = $("digestToggle");
-    btn.classList.toggle("hidden", !last);
-    if (!last) pre.classList.add("hidden");
+    paintDigestMessage($("digestMsg"), last && last.text ? last.text : "");
 
     var list = $("digestRuns"); clear(list);
     if (digestRuns.length > 1) {
-      list.appendChild(el("div", "muted", "Earlier runs (newest first)"));
+      list.appendChild(el("div", "muted", t("digest.earlier")));
       digestRuns.slice(1, 6).forEach(function (r) {
-        var row = el("div", "", "");
-        row.style.cssText = "display:flex;gap:8px;align-items:center;margin-top:4px";
-        row.appendChild(el("span", "chip " + (r.ok ? "ok" : "bad"), r.ok ? "OK" : "Failed"));
+        var row = el("div", "digest-run");
+        row.appendChild(el("span", "chip " + (r.ok ? "ok" : "bad"), r.ok ? t("digest.ok") : t("digest.failChip")));
         row.appendChild(el("span", "muted", when(r.startedAt, d.timezone) + (r.ok ? "" : " - " + (r.error || ""))));
         list.appendChild(row);
       });
     }
   }
+  function digestKind(line) {
+    var l = line.toLowerCase();
+    if (l.indexOf("review first") === 0) return "review";
+    if (l.indexOf("ready to merge") === 0) return "merge";
+    if (l.indexOf("waiting on the author") === 0) return "blocked";
+    if (l.indexOf("ci status unknown") === 0) return "unclear";
+    if (l.indexOf("could not analyse") === 0) return "fail";
+    if (l.indexOf("nothing is waiting") === 0 || l.indexOf("no open pull requests") === 0) return "idle";
+    return "";
+  }
+  function takeHashNum(s) {
+    if (s.charAt(0) !== "#") return null;
+    var n = "", j = 1;
+    while (j < s.length && isDigit(s.charAt(j))) { n += s.charAt(j); j++; }
+    if (!n) return null;
+    var title = s.slice(j);
+    while (title.charAt(0) === " ") title = title.slice(1);
+    return { num: n, title: title };
+  }
+  /* "Review first (4 waiting):" → title + count chip. Leave other parentheticals alone. */
+  function digestHeading(line) {
+    var s = line;
+    if (s.charAt(s.length - 1) === ":") s = s.slice(0, -1);
+    var open = s.lastIndexOf(" (");
+    if (open > 0 && s.charAt(s.length - 1) === ")") {
+      var inner = s.slice(open + 2, s.length - 1);
+      if (inner && isDigit(inner.charAt(0))) return { title: s.slice(0, open), badge: inner };
+    }
+    return { title: s, badge: "" };
+  }
+  function paintDigestMessage(host, text) {
+    clear(host);
+    if (!text) { host.appendChild(el("div", "digest-empty", t("digest.nothing"))); return; }
+    var lines = text.split(NL);
+    var heading = el("div", "digest-head");
+    var i = 0;
+    while (i < lines.length && String(lines[i]).trim() === "") i++;
+    if (i < lines.length) {
+      heading.appendChild(el("div", "digest-kicker", String(lines[i])));
+      i++;
+    }
+    if (i < lines.length && String(lines[i]).charAt(0) === "(") {
+      var whenLine = String(lines[i]);
+      if (whenLine.charAt(0) === "(" && whenLine.charAt(whenLine.length - 1) === ")") whenLine = whenLine.slice(1, -1);
+      heading.appendChild(el("div", "digest-when", whenLine));
+      i++;
+    }
+    if (heading.childNodes.length) host.appendChild(heading);
+
+    var sec = null, lastBody = null, lastLink = null;
+    var openSec = function (kind, title) {
+      sec = el("div", "digest-sec" + (kind ? " " + kind : ""));
+      var h = el("h3", "");
+      var bits = digestHeading(title);
+      inline(h, bits.title);
+      if (bits.badge) h.appendChild(el("span", "chip", bits.badge));
+      sec.appendChild(h);
+      lastBody = null;
+      lastLink = null;
+      host.appendChild(sec);
+    };
+    for (; i < lines.length; i++) {
+      var raw = String(lines[i]).split(String.fromCharCode(13)).join("");
+      var trim = raw.trim();
+      if (!trim) continue;
+      var kind = digestKind(trim);
+      if (kind) { openSec(kind, trim); continue; }
+      if (trim.indexOf("https://") === 0 && lastLink) {
+        lastLink.href = trim;
+        lastLink.target = "_blank";
+        lastLink.rel = "noopener noreferrer";
+        lastLink.title = trim;
+        continue;
+      }
+      var rest = trim;
+      if (rest.charAt(0) === "-") {
+        rest = rest.slice(1);
+        while (rest.charAt(0) === " ") rest = rest.slice(1);
+      }
+      var parsed = rest.charAt(0) === "#" ? takeHashNum(rest) : null;
+      if (parsed && (trim.charAt(0) === "-" || trim.charAt(0) === "#")) {
+        if (!sec) openSec("", t("digest.what"));
+        var tight = sec.className.indexOf("blocked") > -1 || sec.className.indexOf("unclear") > -1;
+        var row = el("div", "digest-row" + (tight ? " tight" : ""));
+        var num = prRef(parsed.num);
+        num.className = "chip num";
+        var main = el("div", "body");
+        if (parsed.title) inline(main, parsed.title);
+        row.appendChild(num);
+        row.appendChild(main);
+        sec.appendChild(row);
+        lastBody = main;
+        lastLink = num;
+        continue;
+      }
+      if (raw.indexOf("  ") === 0 && lastBody && trim.indexOf("https://") !== 0 && trim.indexOf("...") !== 0) {
+        lastBody.appendChild(el("div", "why", trim));
+        continue;
+      }
+      var note = el("div", "digest-note");
+      inline(note, trim);
+      if (trim.indexOf("...") === 0 && sec) {
+        sec.appendChild(note);
+      } else if (endsWith(trim, "skipped.") || trim.indexOf("More open pull requests") === 0) {
+        note.className = "digest-foot";
+        host.appendChild(note);
+        sec = null;
+      } else {
+        if (!sec) openSec("", t("digest.what"));
+        sec.appendChild(note);
+      }
+      lastBody = null;
+      lastLink = null;
+    }
+  }
   function loadDigest() {
     api("/api/digest").then(renderDigest).catch(function () {});
   }
-  $("digestToggle").onclick = function () {
-    var pre = $("digestText");
-    var hide = !pre.classList.contains("hidden");
-    pre.classList.toggle("hidden", hide);
-    $("digestToggle").textContent = hide ? "Show last message" : "Hide last message";
-  };
 
   /* ---------- queue: filters, sorting, expandable cards ---------- */
   var SORTS = [
@@ -1470,12 +1616,17 @@ export const APP_JS = `
   var ACTION_LABEL_KEYS = { pending: "status.pending", executed: "status.executed", rejected: "status.rejected", failed: "status.failed", uncertain: "status.uncertain", executing: "status.executing", expired: "status.expired", superseded: "status.superseded" };
   var ACTION_ICON = { pending: "clock", executed: "checkCircle", rejected: "x", failed: "alert", uncertain: "help", executing: "refresh", expired: "clock", superseded: "refresh" };
 
+  function prGone(error) {
+    return typeof error === "string" && /is (closed|merged|locked)|was not found/i.test(error);
+  }
+
   /* Three-step diagram of the approval life cycle: Requested -> Decision -> Posted. */
-  function flowChart(status) {
+  function flowChart(status, error) {
     // Each step is "done", "now", "fail" or "todo".
-    var s2 = { pending: "now", executing: "done", executed: "done", failed: "done", uncertain: "done", rejected: "fail", expired: "fail", superseded: "fail" }[status] || "todo";
+    var gone = status === "failed" && prGone(error);
+    var s2 = gone ? "fail" : { pending: "now", executing: "done", executed: "done", failed: "done", uncertain: "done", rejected: "fail", expired: "fail", superseded: "fail" }[status] || "todo";
     var s3 = { executing: "now", executed: "done", failed: "fail", uncertain: "fail" }[status] || "todo";
-    var l2 = { pending: t("flow.awaiting"), rejected: t("flow.rejected"), expired: t("flow.expired"), superseded: t("flow.superseded") }[status] || t("flow.approved");
+    var l2 = gone ? t("flow.prGone") : { pending: t("flow.awaiting"), rejected: t("flow.rejected"), expired: t("flow.expired"), superseded: t("flow.superseded") }[status] || t("flow.approved");
     var l3 = { executing: t("flow.posting"), executed: t("flow.posted"), failed: t("flow.notPosted"), uncertain: t("flow.unconfirmed") }[status] || t("flow.post");
     var steps = [["done", t("flow.requested")], [s2, l2], [s3, l3]];
     var box = el("ol", "flow");
@@ -1522,7 +1673,7 @@ export const APP_JS = `
     head.appendChild(chev);
     var badge = el("span", "chip " + tone);
     badge.appendChild(icon(ACTION_ICON[a.status] || "dot"));
-    badge.appendChild(el("span", "", t(ACTION_LABEL_KEYS[a.status] || "") || a.status));
+    badge.appendChild(el("span", "", a.status === "failed" && prGone(a.error) ? t("status.prGone") : t(ACTION_LABEL_KEYS[a.status] || "") || a.status));
     head.appendChild(badge);
     var prHref = safeUrl(a.prUrl);
     var hmain = el("div", "act-main");
@@ -1539,7 +1690,7 @@ export const APP_JS = `
       prLink.title = "Open the pull request on GitHub";
       box.appendChild(prLink);
     }
-    box.appendChild(flowChart(a.status));
+    box.appendChild(flowChart(a.status, a.error));
 
     var meta = "Requested by " + a.requestedBy + " via " + a.requestedVia + " - " + ago(a.createdAt);
     if (a.status === "pending") meta += " - expires " + inFuture(a.expiresAt);

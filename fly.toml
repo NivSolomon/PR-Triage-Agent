@@ -8,7 +8,7 @@ primary_region = "fra"
   PORT = "3000"
   TZ = "Asia/Jerusalem"
   DATABASE_PATH = "/data/agent.sqlite"
-  DIGEST_CRON = "30 8 * * 1-5"
+  DIGEST_CRON = "30 8 * * 0-5"
   MONTHLY_BUDGET_USD = "50"
   HOSTING_COST_USD = "7"
   # One reverse proxy (Fly's) sits in front: needed for the real client address (login lockout) and the Secure cookie.

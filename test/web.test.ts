@@ -128,6 +128,12 @@ describe("public routes and headers", () => {
     expect(APP_JS).not.toMatch(/if \(!list \|\| ordered !== isNumbered\)/);
   });
 
+  it("labels a withdrawn request as no longer open when the PR closed", () => {
+    expect(APP_JS).toMatch(/function prGone\(error\)/);
+    expect(APP_JS).toMatch(/status\.prGone/);
+    expect(APP_JS).toMatch(/flowChart\(a\.status, a\.error\)/);
+  });
+
   it("folds a long ranked list after 3 items and reveals more in chunks", () => {
     expect(APP_JS).toMatch(/var LIST_PREVIEW = 3/);
     expect(APP_JS).toMatch(/var LIST_STEP = 5/);
@@ -515,7 +521,7 @@ describe("scheduled digest status", () => {
     ...over,
   });
   const info = (runs: RunRecord[], nextRun: Date | null = new Date("2026-10-23T05:30:00.000Z")): DigestInfo => ({
-    cron: "30 8 * * 1-5",
+    cron: "30 8 * * 0-5",
     timezone: "Asia/Jerusalem",
     target: "Slack digest channel",
     nextRun: () => nextRun,
@@ -535,7 +541,7 @@ describe("scheduled digest status", () => {
     const body = await res.json();
     expect(body).toMatchObject({
       enabled: true,
-      cron: "30 8 * * 1-5",
+      cron: "30 8 * * 0-5",
       schedule: "Weekdays at 08:30",
       timezone: "Asia/Jerusalem",
       target: "Slack digest channel",
@@ -560,8 +566,10 @@ describe("scheduled digest status", () => {
 
   it("the page shows it with text only, and refreshes it from the local database", () => {
     expect(INDEX_HTML).toContain('id="digestPanel"');
+    expect(INDEX_HTML).toContain('id="digestMsg"');
     expect(APP_JS).toMatch(/api\("\/api\/digest"\)/);
-    expect(APP_JS).toMatch(/pre\.textContent = /);
+    expect(APP_JS).toMatch(/paintDigestMessage\(/);
+    expect(APP_JS).not.toMatch(/innerHTML|outerHTML|insertAdjacentHTML|document\.write/);
   });
 });
 
@@ -617,6 +625,22 @@ describe("approvals over the web", () => {
     expect((await call("/api/actions/does-not-exist/approve", { key: APPROVER, method: "POST", body: {} })).status).toBe(409);
     expect((await call("/api/actions/a%20b/approve", { key: APPROVER, method: "POST", body: {} })).status).toBe(400);
     expect(github.postComment).not.toHaveBeenCalled();
+  });
+
+  it("GET /api/actions drops a pending request once the pull request is closed", async () => {
+    const { call, github, id } = await withPending();
+    github.getPrSummary.mockResolvedValue({
+      number: 7,
+      title: "Fix login",
+      sourceUrl: "https://github.com/acme/app/pull/7",
+      state: "closed",
+      merged: true,
+    });
+    const list = await (await call("/api/actions", { key: READER })).json();
+    const row = list.actions.find((a: { id: string }) => a.id === id);
+    expect(row.status).toBe("failed");
+    expect(row.error).toMatch(/is merged/);
+    expect(list.actions.filter((a: { status: string }) => a.status === "pending")).toHaveLength(0);
   });
 
   it("GET /api/actions still returns a pending request when later history would fill the cap", async () => {

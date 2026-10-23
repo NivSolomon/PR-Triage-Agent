@@ -407,7 +407,8 @@ describe("writes", () => {
     expect(isAmbiguousFailure(new GitHubError("net"))).toBe(true);
     expect(isAmbiguousFailure(new GitHubError("bad gateway", 502))).toBe(true);
     expect(isAmbiguousFailure(new GitHubError("forbidden", 403))).toBe(false);
-    expect(isAmbiguousFailure(new Error("other"))).toBe(false);
+    // A parse / JSON error after a 2xx is not a GitHubError: we cannot tell if the write landed.
+    expect(isAmbiguousFailure(new Error("invalid json"))).toBe(true);
   });
 });
 

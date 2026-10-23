@@ -375,6 +375,20 @@ describe("Tools and permissions", () => {
     );
     expect(out.pr.headBranch).toBe("fix/ci");
     expect(out.pr.baseBranch).toBe("main");
+    expect(out.pr.githubState).toBe("open");
+  });
+
+  it("a closed PR is not scored as needing review", async () => {
+    const { approvals, github } = setup(() => ({}));
+    github.getPr.mockResolvedValueOnce({ ...detail(3), state: "closed", title: "WIP: drag cards between columns" });
+    const out = JSON.parse(
+      await runTool("get_pull_request", { number: 3 }, readerCtx, { github, approvals: approvals as never }),
+    );
+    expect(out.closed).toBe(true);
+    expect(out.notOpen).toBe(true);
+    expect(out.assessment).toBeUndefined();
+    expect(out.message).toMatch(/is closed/);
+    expect(out.message).toMatch(/not on the open review queue/);
   });
 
   it("the prompt keeps the model from guessing what changed or why CI failed, and points it at the branch fields", () => {
@@ -391,6 +405,8 @@ describe("Tools and permissions", () => {
     expect(p).toMatch(/no wording and no intent/);
     expect(p).toMatch(/Call get_pull_request for that number first/);
     expect(p).toMatch(/notFound true/);
+    expect(p).toMatch(/closed true/);
+    expect(p).toMatch(/do not propose a comment on it/i);
     expect(p).toMatch(/even in a multi-part answer/);
     expect(p).toMatch(/do not stop after the error/);
   });

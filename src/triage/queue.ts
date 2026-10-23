@@ -44,6 +44,8 @@ export async function buildQueue(
   const settled = await mapLimit(slice, CONCURRENCY, async (p) => {
     try {
       const detail: PrDetail = await github.getPr(p.number);
+      // listOpenPrs is open-only; a PR can still close between the list and this fetch.
+      if (detail.state === "closed") return { ok: true as const, assessment: null };
       return { ok: true as const, assessment: assessPr(detail, now) };
     } catch (err) {
       return {
@@ -58,7 +60,7 @@ export async function buildQueue(
     }
   });
 
-  const items = rankAssessments(settled.flatMap((s) => (s.ok ? [s.assessment] : [])));
+  const items = rankAssessments(settled.flatMap((s) => (s.ok && s.assessment ? [s.assessment] : [])));
   const failed = settled.flatMap((s) => (s.ok ? [] : [s.failure]));
   return { generatedAt: now.toISOString(), repo: github.repo, items, failed, truncated };
 }

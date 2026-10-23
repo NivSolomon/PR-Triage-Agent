@@ -8,7 +8,7 @@ import { openDatabase } from "../src/store/db.js";
 const APPROVER = "slack:U01";
 const OUTSIDER = "slack:U02";
 
-function setup(overrides: { postComment?: ReturnType<typeof vi.fn>; findComment?: ReturnType<typeof vi.fn> } = {}) {
+function setup(overrides: { postComment?: ReturnType<typeof vi.fn>; findComment?: ReturnType<typeof vi.fn>; onRetired?: ReturnType<typeof vi.fn> } = {}) {
   const github = {
     getPrSummary: vi.fn(async (n: number) => ({
       number: n,
@@ -33,6 +33,7 @@ function setup(overrides: { postComment?: ReturnType<typeof vi.fn>; findComment?
     now: () => clock,
     newId: () => `id-${++counter}`,
     ttlMs: 60_000,
+    onRetired: overrides.onRetired,
   });
   return {
     github,
@@ -245,6 +246,21 @@ describe("failure halfway through an approved action", () => {
     expect(done.error).toMatch(/No matching comment/);
   });
 
+  it("looks up the marker when the POST succeeded but the reply could not be parsed (no duplicate)", async () => {
+    const { service, github } = setup({
+      postComment: vi.fn(async () => {
+        throw new Error("Unexpected end of JSON input");
+      }),
+      findComment: vi.fn(async () => ({ id: 9, url: "https://github.com/acme/app/pull/7#issuecomment-9" })),
+    });
+    const a = await rec(service);
+    const done = await service.approve(a.id, APPROVER);
+    expect(done.status).toBe("executed");
+    expect(done.resultUrl).toContain("issuecomment-9");
+    expect(github.postComment).toHaveBeenCalledTimes(1);
+    expect(github.findCommentWithMarker).toHaveBeenCalledWith(7, actionMarker(a.id), a.createdAt);
+  });
+
   it("marks uncertain when the response was lost and the follow-up lookup also fails", async () => {
     const { service } = setup({
       postComment: vi.fn(async () => {
@@ -442,6 +458,38 @@ describe("approve when the pull request is no longer open", () => {
     expect(done.status).toBe("failed");
     expect(done.error).toMatch(/locked/);
     expect(github.postComment).not.toHaveBeenCalled();
+  });
+
+  it("withdraws a pending request when the pull request is later closed, without waiting for an approver", async () => {
+    const onRetired = vi.fn();
+    const { service, github } = setup({ onRetired });
+    const a = await rec(service);
+    expect(service.listPending()).toHaveLength(1);
+    github.getPrSummary.mockResolvedValue({
+      number: 7,
+      title: "Fix login",
+      sourceUrl: "https://github.com/acme/app/pull/7",
+      state: "closed",
+      merged: true,
+      locked: false,
+    });
+    const dropped = await service.dropStalePending();
+    expect(dropped).toHaveLength(1);
+    expect(dropped[0]?.status).toBe("failed");
+    expect(dropped[0]?.error).toMatch(/is merged/);
+    expect(service.listPending()).toHaveLength(0);
+    expect(onRetired).toHaveBeenCalledWith([expect.objectContaining({ id: a.id, status: "failed" })]);
+    expect(renderOutcome(service.get(a.id)!)).toMatch(/is merged/);
+    expect(renderOutcome(service.get(a.id)!)).not.toMatch(/Approved, but/);
+  });
+
+  it("leaves a pending request alone while the pull request is still open", async () => {
+    const { service, github } = setup();
+    await rec(service);
+    const dropped = await service.dropStalePending();
+    expect(dropped).toHaveLength(0);
+    expect(service.listPending()).toHaveLength(1);
+    expect(github.getPrSummary).toHaveBeenCalled();
   });
 
   it("refuses to create a request on a closed PR", async () => {

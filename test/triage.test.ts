@@ -137,6 +137,14 @@ describe("assessPr: state", () => {
     expect(assessPr(pr({ draft: true }), NOW).state).toBe("draft");
   });
 
+  it("a closed PR is never scored as something to review now", () => {
+    const a = assessPr(pr({ state: "closed", title: "WIP: drag cards between columns" }), NOW);
+    expect(a.state).not.toBe("needs_review");
+    expect(a.score).toBe(0);
+    expect(a.recommendation).toMatch(/closed/);
+    expect(a.signals.some((s) => s.code === "closed")).toBe(true);
+  });
+
   it("approved on the current code + green + GitHub says clean is ready to merge", () => {
     const a = assessPr(pr({ reviews: [approval("sam", "APPROVED", "abc")] }), NOW);
     expect(a.state).toBe("ready_to_merge");
@@ -373,6 +381,17 @@ describe("buildQueue", () => {
     const q = await buildQueue(github, { limit: 2, now: NOW });
     expect(q.items).toHaveLength(2);
     expect(q.truncated).toBe(true);
+  });
+
+  it("drops a PR that closed between the open list and the detail fetch", async () => {
+    const github = {
+      repo: "acme/app",
+      listOpenPrs: vi.fn(async () => [summary(1), summary(3)] as never),
+      getPr: vi.fn(async (n: number) => (n === 3 ? pr({ number: 3, state: "closed" }) : pr({ number: n }))),
+    };
+    const q = await buildQueue(github, { now: NOW });
+    expect(q.items.map((i) => i.number)).toEqual([1]);
+    expect(q.failed).toEqual([]);
   });
 
   it("depends on GitHubReader, not GitHubClient: a stub with no HTTP client is enough", async () => {

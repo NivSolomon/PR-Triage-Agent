@@ -8,19 +8,50 @@ import { count } from "../text/en.js";
 
 const TOP_N = 3;
 
+/** "Fri 23 Oct, 08:30" — the same clock the schedule uses, not a raw UTC ISO string. */
+export function formatDigestClock(iso: string, timeZone?: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  try {
+    const opts: Intl.DateTimeFormatOptions = {
+      weekday: "short",
+      day: "numeric",
+      month: "short",
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+      ...(timeZone ? { timeZone } : {}),
+    };
+    const p: Record<string, string> = {};
+    new Intl.DateTimeFormat("en-GB", opts).formatToParts(d).forEach((part) => {
+      if (part.type !== "literal") p[part.type] = part.value;
+    });
+    if (!p.weekday || !p.day || !p.month || !p.hour || !p.minute) return iso;
+    return `${p.weekday} ${p.day} ${p.month}, ${p.hour}:${p.minute}`;
+  } catch {
+    return iso;
+  }
+}
+
 const brief = (a: TriageAssessment): string => {
   const why = a.signals.find((s) => s.code === "long_wait" || s.code === "small" || s.code === "approved")?.text;
   const caveat = a.confidence === "high" ? "" : ` [confidence ${a.confidence}]`;
-  return `- #${a.number} ${a.title}${caveat}${why ? ` (${why.replace(/\.$/, "")})` : ""}\n  ${a.sourceUrl}`;
+  const lines = [`- #${a.number} ${a.title}${caveat}`];
+  if (why) lines.push(`  ${why.replace(/\.$/, "")}`);
+  lines.push(`  ${a.sourceUrl}`);
+  return lines.join("\n");
 };
+
+const named = (a: TriageAssessment): string => `- #${a.number} ${a.title}`;
 
 /**
  * The morning digest. Built from the deterministic queue, not the model:
  * it costs nothing, cannot be blocked by the AI budget, and says the same thing every time
  * for the same data.
  */
-export function renderDigest(q: QueueResult): string {
-  const lines = [`PR digest for ${q.repo}`, `(live GitHub data, ${q.generatedAt})`, ``];
+export function renderDigest(q: QueueResult, opts: { timeZone?: string } = {}): string {
+  const clock = formatDigestClock(q.generatedAt, opts.timeZone ?? process.env.TZ);
+  const lines = [`PR digest for ${q.repo}`, `(live GitHub data, ${clock})`, ``];
   const review = q.items.filter((a) => a.state === "needs_review");
   const merge = q.items.filter((a) => a.state === "ready_to_merge");
   const blocked = q.items.filter((a) => a.state === "waiting_on_author");
@@ -45,10 +76,14 @@ export function renderDigest(q: QueueResult): string {
     lines.push(``);
   }
   if (blocked.length > 0) {
-    lines.push(`Waiting on the author (do not review yet): ${blocked.map((a) => `#${a.number}`).join(", ")}`, ``);
+    lines.push(`Waiting on the author (do not review yet):`);
+    blocked.forEach((a) => lines.push(named(a)));
+    lines.push(``);
   }
   if (unclear.length > 0) {
-    lines.push(`CI status unknown, check by hand: ${unclear.map((a) => `#${a.number}`).join(", ")}`, ``);
+    lines.push(`CI status unknown, check by hand:`);
+    unclear.forEach((a) => lines.push(named(a)));
+    lines.push(``);
   }
   if (drafts.length > 0) lines.push(`${count(drafts.length, "draft")} skipped.`, ``);
   if (q.failed.length > 0) {
@@ -67,6 +102,8 @@ export interface DigestDeps {
   send: (text: string) => Promise<void>;
   /** Where each run is recorded, so the web page can show whether the schedule fired and worked. Optional. */
   runs?: Pick<RunRepository, "record">;
+  /** Clock the digest header uses. Defaults to TZ / the process zone. */
+  timeZone?: string;
 }
 
 const messageOf = (err: unknown): string => (err instanceof Error ? err.message : String(err));
@@ -88,7 +125,7 @@ export async function runDigest(deps: DigestDeps): Promise<{ ok: boolean }> {
 
   let text = "";
   try {
-    text = renderDigest(await buildQueue(deps.github));
+    text = renderDigest(await buildQueue(deps.github), { timeZone: deps.timeZone ?? process.env.TZ });
     await deps.send(text);
     log(true, null, text);
     return { ok: true };

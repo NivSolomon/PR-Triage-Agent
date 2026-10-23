@@ -158,7 +158,7 @@ export class Agent {
     const plain = toPlainText(
       answer ?? t("agent.outOfSteps"),
     );
-    const grounding = checkGrounding(plain, fetched, text);
+    const grounding = checkGrounding(plain, fetched, text, missing);
     if (grounding.ungrounded.length > 0) {
       // The signal to watch in production: a rising count means the model is drifting.
       console.warn(`[grounding] request ${requestId} mentioned PR numbers not in fetched data: ${grounding.ungrounded.join(",")}`);

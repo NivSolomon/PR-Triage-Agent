@@ -41,6 +41,11 @@ export function renderApprovalCard(a: ActionRecord): string {
   ].join("\n");
 }
 
+/** True when a request was withdrawn because the PR can no longer take a comment. */
+export function isUncommentableFailure(error: string | null | undefined): boolean {
+  return Boolean(error && /is (closed|merged|locked)|was not found/i.test(error));
+}
+
 /** One-line, user-facing result of a decided action. */
 export function renderOutcome(a: ActionRecord): string {
   switch (a.status) {
@@ -53,6 +58,9 @@ export function renderOutcome(a: ActionRecord): string {
     case "expired":
       return `This request expired. Nothing was posted on #${a.prNumber}.`;
     case "failed":
+      if (isUncommentableFailure(a.error)) {
+        return a.error ?? `Pull request #${a.prNumber} is no longer open. Nothing was posted.`;
+      }
       return `Approved, but the comment was not posted: ${a.error ?? "unknown error"}. You can propose it again.`;
     case "uncertain":
       return `Approved, but I could not confirm the result: ${a.error ?? "the outcome is unknown"}. Please check ${a.prUrl} before trying again.`;

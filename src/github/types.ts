@@ -18,6 +18,8 @@ export interface PrSummary {
   sourceUrl: string;
   /** GitHub issue state. Absent on some test doubles; treat as open. */
   state?: "open" | "closed";
+  /** True when the pull request was merged (GitHub still reports state as closed). */
+  merged?: boolean;
   /** True when the conversation is locked (GitHub refuses new comments). */
   locked?: boolean;
 }

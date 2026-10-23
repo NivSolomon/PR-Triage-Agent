@@ -736,6 +736,7 @@ export class SlackChannel {
     let pending: number | undefined;
     try {
       budgetLevel = this.d.budget.summary().level;
+      await this.d.approvals.dropStalePending?.();
       pending = this.d.approvals.listPending().length;
     } catch {
       // The guide is useful without the live numbers.
@@ -759,6 +760,7 @@ export class SlackChannel {
   }
 
   private async showPending(userId: string, say: (text: string) => Promise<void>): Promise<void> {
+    await this.d.approvals.dropStalePending?.();
     const list = this.d.approvals.listPending();
     if (list.length === 0) return say("Nothing is waiting for approval.");
     if (!this.isApprover(slackActor(userId))) {

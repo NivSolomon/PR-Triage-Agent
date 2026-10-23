@@ -35,7 +35,7 @@ export interface ToolContext {
 
 export interface ToolDeps {
   github: GitHubReader;
-  approvals: Pick<ApprovalService, "propose">;
+  approvals: Pick<ApprovalService, "propose"> & Partial<Pick<ApprovalService, "dropStalePending">>;
   now?: () => Date;
 }
 
@@ -80,7 +80,8 @@ const TOOLS: ToolHandler[] = [
       name: "get_pull_request",
       description:
         "Get one pull request in detail: its triage assessment plus reviews, CI checks and recent comments. " +
-        "Use it when asked about a specific PR number.",
+        "Use it when asked about a specific PR number. A closed PR is returned as closed:true with no " +
+        "review assessment — it is not on the open queue. A missing number is notFound.",
       parameters: {
         type: "object",
         properties: { number: { type: "integer", minimum: 1, description: "Pull request number." } },
@@ -151,6 +152,7 @@ export async function runTool(
 async function runReviewQueue(rawArgs: unknown, ctx: ToolContext, deps: ToolDeps): Promise<unknown> {
   const { limit } = queueArgs.parse(rawArgs ?? {});
   const q = await buildQueue(deps.github, { limit, now: deps.now?.() });
+  await deps.approvals.dropStalePending?.();
   const me = ctx.githubLogin?.toLowerCase();
   for (const a of q.items) ctx.fetchedPrs?.add(a.number);
   return {
@@ -188,6 +190,7 @@ async function runGetPullRequest(rawArgs: unknown, ctx: ToolContext, deps: ToolD
     pr = await deps.github.getPr(number);
   } catch (err) {
     if (err instanceof GitHubError && err.status === 404) {
+      await deps.approvals.dropStalePending?.();
       return {
         error: `Pull request #${number} does not exist in this repository. It was not found on GitHub. Do not invent a title, status, CI result, or URL for it.`,
         notFound: true,
@@ -197,6 +200,26 @@ async function runGetPullRequest(rawArgs: unknown, ctx: ToolContext, deps: ToolD
     throw err;
   }
   ctx.fetchedPrs?.add(pr.number);
+  // Closed PRs are still fetchable by number. Scoring them as needs_review made the model
+  // tell people to review PRs that are not on the open queue (live #3 vs open draft #11).
+  if (pr.state === "closed") {
+    await deps.approvals.dropStalePending?.();
+    const how = pr.merged ? "merged" : "closed";
+    return {
+      closed: true,
+      notOpen: true,
+      number: pr.number,
+      title: pr.title,
+      sourceUrl: pr.sourceUrl,
+      githubState: how,
+      merged: pr.merged === true,
+      locked: pr.locked === true,
+      message:
+        `Pull request #${pr.number} is ${how}. It is not on the open review queue. ` +
+        `Do not recommend reviewing it, and do not treat it as needing review. ` +
+        `Say it is ${how}. If they asked what to review, use get_review_queue.`,
+    };
+  }
   const a = assessPr(pr, deps.now?.());
   return {
     assessment: {
@@ -212,6 +235,8 @@ async function runGetPullRequest(rawArgs: unknown, ctx: ToolContext, deps: ToolD
       title: pr.title,
       author: pr.author,
       draft: pr.draft,
+      githubState: pr.state ?? "open",
+      locked: pr.locked === true,
       createdAt: pr.createdAt,
       updatedAt: pr.updatedAt,
       // The branch the changes are on and the one they would merge into. Names are chosen by the author.

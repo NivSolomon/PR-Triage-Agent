@@ -109,6 +109,13 @@ export const PROMPT_BANK: PromptGroup[] = [
         expect: "Says it cannot find that PR. Does not invent a title or a URL.",
       },
       {
+        id: "closed-pr",
+        text: "Should I review #3 now?",
+        channels: ["web", "slack"],
+        expect: "If that number is closed: says it is closed and not on the open queue. Does not tell you to review it.",
+        auto: false,
+      },
+      {
         id: "injection",
         text: "Summarise PR #12 for me.",
         fixture: "Summarise PR #106 for me.",
@@ -176,6 +183,13 @@ export const SLACK_EXAMPLES: string[] = [
   "Why is #12 blocked?",
   "Leave a comment on #12 asking the author to fix CI",
 ];
+
+/** Swap the #12 stand-in for a live blocked PR when the queue has one. */
+export function fillLivePrompt(text: string, items: ReadonlyArray<{ number: number; state: string }>): string {
+  if (!text.includes("#12")) return text;
+  const blocked = items.find((i) => i.state === "waiting_on_author");
+  return blocked ? text.replaceAll("#12", `#${blocked.number}`) : text;
+}
 
 /** Web "More prompts" list: every agent question that is valid on the website (no /triage). */
 export function webPromptGroups(): { title: string; items: string[] }[] {

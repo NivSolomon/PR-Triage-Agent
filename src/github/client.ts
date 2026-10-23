@@ -55,6 +55,7 @@ const rawPrListItem = z.object({
   base: z.object({ ref: z.string() }),
   head: z.object({ sha: z.string(), ref: z.string() }),
   state: z.string().optional(),
+  merged: z.boolean().optional(),
   locked: z.boolean().optional(),
 });
 
@@ -168,11 +169,13 @@ export interface PostedComment {
 }
 
 /**
- * True when we cannot tell whether a write reached GitHub: no HTTP response at all
- * (network error / timeout) or a 5xx. A 4xx is a definite "it did not happen".
+ * True when we cannot tell whether a write reached GitHub.
+ * A 4xx GitHubError is a definite refusal. No HTTP status, a 5xx, or any
+ * unexpected error (invalid JSON / Zod parse after a 2xx) means we must look
+ * up the hidden marker instead of guessing "nothing was posted".
  */
 export function isAmbiguousFailure(err: unknown): boolean {
-  if (!(err instanceof GitHubError)) return false;
+  if (!(err instanceof GitHubError)) return true;
   return err.status === undefined || err.status >= 500;
 }
 
@@ -292,6 +295,7 @@ export class GitHubClient implements GitHubPort {
       headSha: p.head.sha,
       sourceUrl: p.html_url,
       state: p.state === "closed" ? "closed" : "open",
+      merged: p.merged === true,
       locked: p.locked === true,
     };
   }

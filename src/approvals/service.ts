@@ -59,6 +59,8 @@ export class ApprovalService {
   private readonly now: () => Date;
   private readonly newId: () => string;
   private readonly ttlMs: number;
+  /** One GitHub sweep at a time, so web poll + Slack pending do not double-fetch. */
+  private sweepInflight: Promise<ActionRecord[]> | undefined;
 
   constructor(private readonly opts: ApprovalServiceOptions) {
     this.now = opts.now ?? (() => new Date());
@@ -138,6 +140,42 @@ export class ApprovalService {
   listPending(): ActionRecord[] {
     this.flushExpired();
     return this.opts.repo.list(["pending"]);
+  }
+
+  /**
+   * Drop pending comments whose pull request is merged, closed, locked, or gone.
+   * Slack cards lose their Approve buttons via `onRetired`. Safe to call often:
+   * concurrent callers share one sweep.
+   */
+  async dropStalePending(): Promise<ActionRecord[]> {
+    this.flushExpired();
+    if (this.sweepInflight) return this.sweepInflight;
+    this.sweepInflight = this.runDropStale().finally(() => {
+      this.sweepInflight = undefined;
+    });
+    return this.sweepInflight;
+  }
+
+  private async runDropStale(): Promise<ActionRecord[]> {
+    const pending = this.opts.repo.list(["pending"]);
+    if (pending.length === 0) return [];
+    const numbers = [...new Set(pending.map((a) => a.prNumber))];
+    const reasonByPr = new Map<number, string>();
+    await Promise.all(
+      numbers.map(async (n) => {
+        const reason = await this.notCommentableNow(n);
+        if (reason) reasonByPr.set(n, reason);
+      }),
+    );
+    if (reasonByPr.size === 0) return [];
+    const retired: ActionRecord[] = [];
+    for (const a of pending) {
+      const reason = reasonByPr.get(a.prNumber);
+      if (!reason) continue;
+      if (this.opts.repo.failIfPending(a.id, reason)) retired.push(this.mustGet(a.id));
+    }
+    await this.notifyRetired(retired);
+    return retired;
   }
 
   /**
@@ -279,7 +317,7 @@ export class ApprovalService {
     const message = err instanceof Error ? err.message : String(err);
 
     if (!isAmbiguousFailure(err)) {
-      // GitHub answered with a clear refusal (or we failed before sending): nothing was posted.
+      // GitHub answered with a clear 4xx: the write was refused, nothing was posted.
       this.opts.repo.finish(action.id, "failed", { error: message });
       return;
     }
@@ -310,8 +348,9 @@ export class ApprovalService {
     }
   }
 
-  private notCommentable(pr: { number: number; state?: string; locked?: boolean }): string | null {
+  private notCommentable(pr: { number: number; state?: string; merged?: boolean; locked?: boolean }): string | null {
     if (pr.locked) return `Pull request #${pr.number} is locked. Nothing was posted.`;
+    if (pr.merged) return `Pull request #${pr.number} is merged. Nothing was posted.`;
     if ((pr.state ?? "open") !== "open") {
       return `Pull request #${pr.number} is ${pr.state}. Nothing was posted.`;
     }

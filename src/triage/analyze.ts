@@ -128,6 +128,24 @@ function describeAge(hours: number): string {
 type CiState = "green" | "red" | "pending" | "unknown" | "none";
 
 export function assessPr(pr: PrDetail, now: Date = new Date()): TriageAssessment {
+  if (pr.state === "closed") {
+    return {
+      number: pr.number,
+      title: pr.title,
+      author: pr.author,
+      requestedReviewers: pr.requestedReviewers,
+      sourceUrl: pr.sourceUrl,
+      // Not a sixth public state: closed PRs are dropped from the queue. This exists so a
+      // get-by-number call cannot be scored as needs_review (live #3 was).
+      state: "unclear",
+      score: 0,
+      confidence: "high",
+      signals: [{ code: "closed", text: "It is closed. It is not on the open review queue.", weight: 0 }],
+      unknowns: [],
+      recommendation: "This pull request is closed. Do not review it.",
+    };
+  }
+
   const signals: Signal[] = [];
   const unknowns: string[] = [];
   const add = (code: string, text: string, weight: number): void => {

@@ -297,8 +297,13 @@ export function createWebApp(deps: WebDeps): express.Express {
       return { queue: queueCache.value, cached: true };
     }
     queueInflight ??= buildQueue(deps.github)
-      .then((value) => {
+      .then(async (value) => {
         queueCache = { at: Date.now(), value };
+        const dropped = await deps.approvals.dropStalePending();
+        if (dropped.length > 0) {
+          const gone = new Set(dropped.map((a) => a.prNumber));
+          if (value.items.some((i) => gone.has(i.number))) queueCache = undefined;
+        }
         return value;
       })
       .finally(() => {
@@ -339,7 +344,12 @@ export function createWebApp(deps: WebDeps): express.Express {
     });
   });
 
-  api.get("/actions", (_req, res) => {
+  api.get("/actions", async (_req, res) => {
+    const dropped = await deps.approvals.dropStalePending();
+    if (dropped.length > 0 && queueCache) {
+      const gone = new Set(dropped.map((a) => a.prNumber));
+      if (queueCache.value.items.some((i) => gone.has(i.number))) queueCache = undefined;
+    }
     res.json({
       actions: deps.approvals.listRecent().map((a) => ({ ...a, card: renderApprovalCard(a) })),
     });

@@ -133,7 +133,8 @@ const schema = z.object({
   WEB_APPROVER_KEY: z.string().min(16, "use at least 16 characters").optional(),
   MCP_TOKENS: jsonMap,
 
-  DIGEST_CRON: z.string().default("30 8 * * 1-5"),
+  /** 08:30 Sunday–Friday (Israel work week). Saturday is skipped. */
+  DIGEST_CRON: z.string().default("30 8 * * 0-5"),
 
   DATABASE_PATH: z.string().default("./data/agent.sqlite"),
 });
@@ -147,9 +148,13 @@ export type Config = z.infer<typeof schema>;
  */
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   // A line like `WEB_ACCESS_KEY=` (as copied from .env.example) arrives as "". That means "not set",
-  // not "set to an invalid empty value", so drop blanks before validating.
+  // not "set to an invalid empty value", so drop blanks before validating. Trim the rest so a
+  // copied `LLM_API_KEY= sk-...` (leading space) is not sent as part of the secret.
   const present = Object.fromEntries(
-    Object.entries(env).filter(([, v]) => v !== undefined && v.trim() !== ""),
+    Object.entries(env).flatMap(([k, v]) => {
+      const trimmed = v?.trim();
+      return trimmed ? [[k, trimmed]] : [];
+    }),
   );
   const result = schema.safeParse(present);
   if (result.success && result.data.TRUST_PROXY > 0 && result.data.AUTH_MAX_FAILURES === 0) {

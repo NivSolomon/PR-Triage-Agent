@@ -106,11 +106,12 @@ export function createApp(config: Config): App {
   const runs = new RunRepository(db);
   // The schedule starts later (in start()), after the web app exists, so the page reads the next run through this.
   let schedule: SchedulerHandle | undefined;
+  const timezone = process.env.TZ || Intl.DateTimeFormat().resolvedOptions().timeZone;
 
   const web = createWebApp({
     digest: {
       cron: config.DIGEST_CRON,
-      timezone: process.env.TZ || Intl.DateTimeFormat().resolvedOptions().timeZone,
+      timezone,
       target: config.SLACK_DIGEST_CHANNEL_ID
         ? "the team's Slack digest channel"
         : "a Slack direct message to each approver",
@@ -160,7 +161,9 @@ export function createApp(config: Config): App {
     slack,
     async start() {
       // Validates the cron expression first, so a typo stops startup instead of never firing.
-      schedule = startDigestSchedule(config.DIGEST_CRON, () => runDigest({ github, send: sendToTeam, runs }));
+      schedule = startDigestSchedule(config.DIGEST_CRON, () =>
+        runDigest({ github, send: sendToTeam, runs, timeZone: timezone }),
+      );
       await new Promise<void>((resolve, reject) => {
         server = web.listen(config.PORT, () => resolve());
         server.once("error", reject);
@@ -170,6 +173,10 @@ export function createApp(config: Config): App {
       const recovered = await approvals.recoverInterrupted();
       if (recovered.length > 0) {
         console.log(`Reconciled ${recovered.length} interrupted approval(s) after restart`);
+      }
+      const stale = await approvals.dropStalePending();
+      if (stale.length > 0) {
+        console.log(`Withdrew ${stale.length} pending request(s) whose pull requests are no longer open`);
       }
     },
     async stop() {

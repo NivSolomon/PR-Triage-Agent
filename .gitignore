@@ -6,5 +6,9 @@ dist/
 data/
 *.sqlite
 *.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
 *.log
 .DS_Store
+Thumbs.db
+coverage/

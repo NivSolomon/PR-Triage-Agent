@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { describeCron } from "../src/scheduler/describe.js";
-import { DIGEST_TASK, renderDigest, runDigest, startDigestSchedule } from "../src/scheduler/digest.js";
+import { DIGEST_TASK, formatDigestClock, renderDigest, runDigest, startDigestSchedule } from "../src/scheduler/digest.js";
 import { openDatabase } from "../src/store/db.js";
 import { RunRepository } from "../src/store/runs.js";
 import type { TriageAssessment } from "../src/triage/analyze.js";
@@ -48,14 +48,22 @@ describe("renderDigest", () => {
     expect(t).toContain("https://github.com/acme/app/pull/1");
     expect(t).toMatch(/and 1 more/);
     expect(t).toContain("Ready to merge");
-    expect(t).toContain("Waiting on the author (do not review yet): #6");
+    expect(t).toContain("Waiting on the author (do not review yet):");
+    expect(t).toContain("- #6 PR 6");
     expect(t).toContain("1 draft skipped");
+    expect(t).toMatch(/live GitHub data, /);
+    expect(t).not.toContain("2026-10-20T05:30:00Z");
+  });
+
+  it("prints the digest clock in the schedule time zone, not a raw UTC ISO string", () => {
+    expect(formatDigestClock("2026-10-23T05:30:02.252Z", "Asia/Jerusalem")).toMatch(/23 Oct, 08:30/);
   });
 
   it("flags low-confidence entries and unknown CI instead of presenting them as certain", () => {
     const t = renderDigest(queue([item(1, "needs_review", { confidence: "medium" }), item(2, "unclear", { confidence: "low" })]));
     expect(t).toContain("[confidence medium]");
-    expect(t).toContain("CI status unknown, check by hand: #2");
+    expect(t).toContain("CI status unknown, check by hand:");
+    expect(t).toContain("- #2 PR 2");
   });
 
   it("is honest about empty and partial results", () => {
@@ -103,7 +111,8 @@ describe("runDigest", () => {
 
 describe("describeCron", () => {
   it.each([
-    ["30 8 * * 1-5", "Weekdays at 08:30"],
+    ["30 8 * * 0-5", "Weekdays at 08:30"],
+    ["30 8 * * 1-5", "Monday to Friday at 08:30"],
     ["0 9 * * *", "Every day at 09:00"],
     ["0 9 * * 0,6", "Weekends at 09:00"],
     ["0 9 * * 6,0", "Weekends at 09:00"],
@@ -112,7 +121,7 @@ describe("describeCron", () => {
     ["0 8 * * 1,3,5", "Monday, Wednesday and Friday at 08:00"],
     ["0 8 * * 1-3", "Monday to Wednesday at 08:00"],
     ["0 8 * * 7", "Every Sunday at 08:00"],
-    ["  30   8 * * 1-5 ", "Weekdays at 08:30"],
+    ["  30   8 * * 0-5 ", "Weekdays at 08:30"],
   ])("says %s in words", (cron, words) => {
     expect(describeCron(cron)).toBe(words);
   });
@@ -207,13 +216,13 @@ describe("startDigestSchedule", () => {
   });
 
   it("accepts a valid one and can be stopped", () => {
-    const h = startDigestSchedule("30 8 * * 1-5", async () => undefined);
+    const h = startDigestSchedule("30 8 * * 0-5", async () => undefined);
     expect(() => h.stop()).not.toThrow();
   });
 
   it("reports when it fires next", () => {
     vi.useFakeTimers({ now: new Date(2026, 9, 22, 17, 0, 0) }); // Thursday 17:00 local time
-    const h = startDigestSchedule("30 8 * * 1-5", async () => undefined);
+    const h = startDigestSchedule("30 8 * * 0-5", async () => undefined);
     const next = h.nextRun();
     h.stop();
     expect(next).not.toBeNull();
@@ -221,11 +230,19 @@ describe("startDigestSchedule", () => {
     expect([next?.getDay(), next?.getHours(), next?.getMinutes()]).toEqual([5, 8, 30]);
   });
 
-  it("fires at 08:30 on a weekday, and not before it, and not on a weekend", async () => {
+  it("after Friday, the next weekday 08:30 is Sunday", () => {
+    vi.useFakeTimers({ now: new Date(2026, 9, 23, 17, 0, 0) }); // Friday 17:00
+    const h = startDigestSchedule("30 8 * * 0-5", async () => undefined);
+    const next = h.nextRun();
+    h.stop();
+    expect([next?.getDay(), next?.getHours(), next?.getMinutes()]).toEqual([0, 8, 30]);
+  });
+
+  it("fires at 08:30 Sunday to Friday, and not on Saturday", async () => {
     // Local time on purpose: the schedule uses the server's TZ, so the test must not depend on which one that is.
     vi.useFakeTimers({ now: new Date(2026, 9, 22, 8, 25, 0) }); // Thu 22 Oct 2026, 08:25
     const run = vi.fn(async () => undefined);
-    const h = startDigestSchedule("30 8 * * 1-5", run);
+    const h = startDigestSchedule("30 8 * * 0-5", run);
 
     // Jump to a wall-clock time, not "+24 h": the clocks change on 25 Oct in some zones (e.g. Israel),
     // and a day is then 25 hours long. The schedule follows the wall clock, so the test must too.
@@ -240,10 +257,12 @@ describe("startDigestSchedule", () => {
 
     await advanceTo(23, 8, 31); // Friday: fires
     expect(run).toHaveBeenCalledTimes(2);
-    await advanceTo(25, 8, 31); // Saturday and Sunday: nothing
+    await advanceTo(24, 8, 31); // Saturday: Israel weekend, skip
     expect(run).toHaveBeenCalledTimes(2);
-    await advanceTo(26, 8, 31); // Monday: fires again
+    await advanceTo(25, 8, 31); // Sunday: fires
     expect(run).toHaveBeenCalledTimes(3);
+    await advanceTo(26, 8, 31); // Monday: fires
+    expect(run).toHaveBeenCalledTimes(4);
     h.stop();
   });
 
@@ -253,7 +272,7 @@ describe("startDigestSchedule", () => {
     const run = vi.fn(async () => {
       throw new Error("boom");
     });
-    const h = startDigestSchedule("30 8 * * 1-5", run);
+    const h = startDigestSchedule("30 8 * * 0-5", run);
     await vi.advanceTimersByTimeAsync(2 * 60_000);
     expect(err).toHaveBeenCalledWith("Scheduled run crashed:", expect.any(Error));
     await vi.advanceTimersByTimeAsync(new Date(2026, 9, 23, 8, 31, 0).getTime() - Date.now()); // next day

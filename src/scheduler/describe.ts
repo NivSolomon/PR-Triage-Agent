@@ -35,7 +35,8 @@ const joinNames = (names: string[]): string =>
 function describeDays(days: number[]): string {
   const key = days.join(",");
   if (days.length === 7) return "Every day";
-  if (key === "1,2,3,4,5") return "Weekdays";
+  // Israel work week (this deployment's TZ is Asia/Jerusalem): Sunday–Friday. Mon–Fri is named in full.
+  if (key === "0,1,2,3,4,5") return "Weekdays";
   if (key === "0,6") return "Weekends";
   if (days.length === 1) return `Every ${DAY_NAMES[days[0]!]}`;
   const contiguous = days.every((d, i) => i === 0 || d === days[i - 1]! + 1);

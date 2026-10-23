@@ -10,6 +10,17 @@ describe("loadConfig", () => {
     expect(c.MCP_TOKENS).toEqual({});
   });
 
+  it("trims leading and trailing whitespace so a copied `KEY= value` still works", () => {
+    const c = loadConfig({
+      LLM_API_KEY: " sk-test-key ",
+      GITHUB_REPO: "  octocat/hello-world\t",
+      SLACK_BOT_TOKEN: "  xoxb-123  ",
+    });
+    expect(c.LLM_API_KEY).toBe("sk-test-key");
+    expect(c.GITHUB_REPO).toBe("octocat/hello-world");
+    expect(c.SLACK_BOT_TOKEN).toBe("xoxb-123");
+  });
+
   it("treats blank values (as copied from .env.example) as not set, not as invalid", () => {
     const c = loadConfig({
       GITHUB_REPO: "",

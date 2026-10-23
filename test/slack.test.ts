@@ -266,6 +266,19 @@ describe("/triage commands", () => {
     expect(replies.join()).toMatch(/Sent 1 approval card/);
   });
 
+  it("checks GitHub before listing pending, so a merged PR is not offered for approval", async () => {
+    const listPending = vi.fn(() => [record()]);
+    const dropStalePending = vi.fn(async () => {
+      listPending.mockReturnValue([]);
+      return [];
+    });
+    const s = setup({ approvals: { listPending, dropStalePending, approve: vi.fn(), reject: vi.fn() } });
+    const replies = await run(s, "U0BOSS", "pending");
+    expect(dropStalePending).toHaveBeenCalled();
+    expect(replies.join()).toMatch(/Nothing is waiting for approval/);
+    expect(s.posts).toHaveLength(0);
+  });
+
   it("a non-approver can see what is pending but gets no buttons", async () => {
     const approvals = { listPending: vi.fn(() => [record()]), approve: vi.fn(), reject: vi.fn() };
     const s = setup({ approvals });
