@@ -52,7 +52,7 @@ export interface SlackUpdate {
 function lastAssistantTool(req: LlmRequest): string | undefined {
   for (let i = req.messages.length - 1; i >= 0; i -= 1) {
     const m = req.messages[i];
-    if (m.role === "assistant" && m.toolCalls?.[0]) return m.toolCalls[0].name;
+    if (m && m.role === "assistant" && m.toolCalls?.[0]) return m.toolCalls[0].name;
   }
   return undefined;
 }

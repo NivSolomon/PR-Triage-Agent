@@ -355,7 +355,7 @@ describe("direct messages and mentions", () => {
     expect(s.agent.ask).toHaveBeenCalledTimes(1);
     await s.channel.handleMessage({ userId: "U0ALICE", channel: "D0ALICE", text: "tell me more about #8" });
     expect(s.agent.ask).toHaveBeenCalledTimes(2);
-    expect(s.agent.ask.mock.calls[1]?.[0]).toEqual(expect.objectContaining({ text: "tell me more about #8" }));
+    expect(s.agent.ask).toHaveBeenNthCalledWith(2, expect.objectContaining({ text: "tell me more about #8" }));
   });
 
   it("/triage more reveals the next chunk without wrapping You asked", async () => {

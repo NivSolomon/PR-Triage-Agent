@@ -2,21 +2,33 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ApprovalError, ApprovalService, actionMarker } from "../src/approvals/service.js";
 import { renderApprovalCard, renderOutcome } from "../src/approvals/render.js";
 import { GitHubError } from "../src/github/client.js";
+import type { ActionRecord } from "../src/store/actions.js";
 import { ActionRepository } from "../src/store/actions.js";
 import { openDatabase } from "../src/store/db.js";
 
 const APPROVER = "slack:U01";
 const OUTSIDER = "slack:U02";
 
-function setup(overrides: { postComment?: ReturnType<typeof vi.fn>; findComment?: ReturnType<typeof vi.fn>; onRetired?: ReturnType<typeof vi.fn> } = {}) {
+function setup(overrides: { postComment?: ReturnType<typeof vi.fn>; findComment?: ReturnType<typeof vi.fn>; onRetired?: (records: ActionRecord[]) => void } = {}) {
   const github = {
-    getPrSummary: vi.fn(async (n: number) => ({
-      number: n,
-      title: "Fix login",
-      sourceUrl: `https://github.com/acme/app/pull/${n}`,
-      state: "open" as "open" | "closed",
-      locked: false,
-    })),
+    getPrSummary: vi.fn(
+      async (
+        n: number,
+      ): Promise<{
+        number: number;
+        title: string;
+        sourceUrl: string;
+        state?: "open" | "closed";
+        merged?: boolean;
+        locked?: boolean;
+      }> => ({
+        number: n,
+        title: "Fix login",
+        sourceUrl: `https://github.com/acme/app/pull/${n}`,
+        state: "open",
+        locked: false,
+      }),
+    ),
     postComment:
       overrides.postComment ??
       vi.fn(async () => ({ id: 1, url: "https://github.com/acme/app/pull/7#issuecomment-1" })),

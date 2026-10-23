@@ -206,7 +206,7 @@ export const EN = {
   "suggest.2": "What is ready to merge?",
   "suggest.3": "Which PRs have gone stale?",
   "budget.label": "AI budget {pct}%",
-  "budget.title": "Monthly AI budget used. Normal, economy or blocked mode depends on this.",
+  "budget.title": "{spent} of {allowance} AI allowance this month ({requests} requests). Queue and digest use none.",
   "budget.mode": "{level} mode",
   "rel.justNow": "just now",
   "rel.inMoments": "in moments",

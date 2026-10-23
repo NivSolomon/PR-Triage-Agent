@@ -61,10 +61,12 @@ export function renderQueue(q: QueueResult, viewer?: { login: string }): string 
 }
 export function renderBudget(s: BudgetSummary): string {
   const money = (n: number) => `$${n.toFixed(2)}`;
+  const pct = Math.round(s.ratio * 100);
+  const pctLabel = pct < 1 && s.spentUsd > 0 ? "<1%" : `${pct}%`;
   return [
     `AI budget for ${s.month}`,
     `Mode: ${s.level}`,
-    `Used: ${money(s.spentUsd)} of ${money(s.llmAllowanceUsd)} AI allowance (${Math.round(s.ratio * 100)}%)`,
+    `Used: ${money(s.spentUsd)} of ${money(s.llmAllowanceUsd)} AI allowance (${pctLabel})`,
     `Monthly cap ${money(s.monthlyBudgetUsd)} includes ${money(s.hostingUsd)} hosting`,
     `Requests this month: ${s.requests}`,
   ].join("\n");

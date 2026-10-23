@@ -1068,14 +1068,21 @@ export const APP_JS = `
   function loadBudget() {
     api("/api/budget").then(function (b) {
       var box = $("budget"); clear(box);
-      var pct = Math.min(100, Math.round(b.ratio * 100));
+      var spent = Number(b.spentUsd) || 0;
+      var pctRound = Math.round((Number(b.ratio) || 0) * 100);
+      var pctBar = Math.min(100, Math.max(spent > 0 ? 3 : 0, pctRound));
       var tone = b.level === "blocked" ? "bad" : b.level === "economy" ? "warn" : "";
-      box.title = "Monthly AI budget used. Normal, economy or blocked mode depends on this.";
+      var pctLabel = pctRound < 1 && spent > 0 ? "<1" : String(pctRound);
+      box.title = t("budget.title", {
+        spent: "$" + spent.toFixed(2),
+        allowance: "$" + (Number(b.llmAllowanceUsd) || 0).toFixed(2),
+        requests: b.requests || 0,
+      });
       box.appendChild(icon("coin"));
-      box.appendChild(el("span", "", "AI budget " + Math.round(b.ratio * 100) + "%"));
-      var m = el("span", "meter " + tone); var i = el("i"); i.style.width = pct + "%"; m.appendChild(i);
+      box.appendChild(el("span", "", t("budget.label", { pct: pctLabel })));
+      var m = el("span", "meter " + tone); var i = el("i"); i.style.width = pctBar + "%"; m.appendChild(i);
       box.appendChild(m);
-      if (b.level !== "normal") box.appendChild(el("span", "chip " + tone, b.level + " mode"));
+      if (b.level !== "normal") box.appendChild(el("span", "chip " + tone, t("budget.mode", { level: b.level })));
     }).catch(function () {});
   }
 

@@ -39,7 +39,18 @@ async function start(
     repo: "acme/app",
     listOpenPrs: vi.fn(async () => [] as never),
     getPr: vi.fn(),
-    getPrSummary: vi.fn(async (n: number) => ({ number: n, title: "Fix login", sourceUrl: `https://github.com/acme/app/pull/${n}` })),
+    getPrSummary: vi.fn(
+      async (
+        n: number,
+      ): Promise<{
+        number: number;
+        title: string;
+        sourceUrl: string;
+        state?: "open" | "closed";
+        merged?: boolean;
+        locked?: boolean;
+      }> => ({ number: n, title: "Fix login", sourceUrl: `https://github.com/acme/app/pull/${n}` }),
+    ),
     postComment: vi.fn(async () => ({ id: 1, url: "https://github.com/acme/app/pull/7#c1" })),
     findCommentWithMarker: vi.fn(async () => null),
   };
