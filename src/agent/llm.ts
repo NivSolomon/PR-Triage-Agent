@@ -45,15 +45,17 @@ export class OpenAiLlm implements LlmPort {
     baseURL: string,
     readonly model: string,
   ) {
+    // Fail within 45s and retry once, so a slow provider doesn't leave a chat user waiting.
     this.client = new OpenAI({ apiKey, baseURL, timeout: 45_000, maxRetries: 1 });
   }
 
   async complete(req: LlmRequest): Promise<LlmResponse> {
     const res = await this.client.chat.completions.create({
       model: this.model,
-      temperature: 0.2,
+      temperature: 0.2, // low: answers should stay factual and repeatable
       max_completion_tokens: req.maxTokens,
       messages: req.messages.map(toOpenAi),
+      // Only send "tools" when there are some (none are offered on the final round).
       ...(req.tools.length > 0
         ? {
             tools: req.tools.map((t) => ({
@@ -66,6 +68,7 @@ export class OpenAiLlm implements LlmPort {
     const msg = res.choices[0]?.message;
     const toolCalls: ToolCall[] = [];
     for (const c of msg?.tool_calls ?? []) {
+      // Only "function" calls are supported; other call types are ignored.
       if (c.type === "function") {
         toolCalls.push({ id: c.id, name: c.function.name, arguments: c.function.arguments });
       }
@@ -81,6 +84,7 @@ export class OpenAiLlm implements LlmPort {
   }
 }
 
+// Converts our neutral message shape to OpenAI's (tool_call_id / tool_calls naming).
 function toOpenAi(m: ChatMessage): OpenAI.Chat.Completions.ChatCompletionMessageParam {
   switch (m.role) {
     case "system":

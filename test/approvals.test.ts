@@ -6,9 +6,13 @@ import type { ActionRecord } from "../src/store/actions.js";
 import { ActionRepository } from "../src/store/actions.js";
 import { openDatabase } from "../src/store/db.js";
 
-const APPROVER = "slack:U01";
-const OUTSIDER = "slack:U02";
+// Tests for ApprovalService: a comment is only proposed first, and posted to GitHub
+// only after an approver approves it. GitHub is faked; the DB is in memory.
 
+const APPROVER = "slack:U01"; // the only identity isApprover() accepts
+const OUTSIDER = "slack:U02"; // a valid user who may not decide
+
+// Builds the service with a fake GitHub and a controllable clock (advance(ms) moves time forward).
 function setup(overrides: { postComment?: ReturnType<typeof vi.fn>; findComment?: ReturnType<typeof vi.fn>; onRetired?: (records: ActionRecord[]) => void } = {}) {
   const github = {
     getPrSummary: vi.fn(
@@ -57,6 +61,7 @@ function setup(overrides: { postComment?: ReturnType<typeof vi.fn>; findComment?
   };
 }
 
+// A valid proposal; tests override single fields.
 const proposal = {
   prNumber: 7,
   body: "CI is failing on unit tests; please fix before review.",
@@ -65,6 +70,7 @@ const proposal = {
   via: "slack",
 };
 
+// Proposes and returns just the stored record.
 const rec = async (s: ApprovalService, over: Partial<typeof proposal> = {}) =>
   (await s.propose({ ...proposal, ...over })).record;
 

@@ -9,6 +9,9 @@ import {
   splitRankedItems,
 } from "../src/text/fold-list.js";
 
+// Tests for folding long ranked PR lists ("show more" support).
+
+// Builds an agent-style answer: intro, n numbered PRs (each with indented detail lines), then an outro.
 function ranked(n: number, intro = "Here are the details:", outro = "Not ready: none."): string {
   const items = Array.from({ length: n }, (_, i) => {
     const k = i + 1;

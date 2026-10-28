@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { toPlainText } from "../src/agent/plain.js";
 
+// toPlainText strips Markdown so replies read cleanly in chat channels that don't render it.
 describe("toPlainText", () => {
   it("removes bold, code, headings and markdown links but keeps the URL", () => {
     const out = toPlainText("## Queue\n- **#101 Fix login**\n  see [the PR](https://github.com/a/b/pull/101) and `npm test`");

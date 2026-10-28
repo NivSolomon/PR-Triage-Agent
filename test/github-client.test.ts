@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { GitHubClient, GitHubError, isAmbiguousFailure, isGeneratedFile, truncate } from "../src/github/client.js";
 
+// Tests for GitHubClient against a fake fetch: parsing, CI/readiness logic, paging, errors and writes.
+
+// A route is either canned JSON (HTTP 200) or { status, headers } to simulate an error response.
 type Route = unknown | { status: number; headers?: Record<string, string> };
 
 /** Build a fake fetch that serves canned JSON by URL substring. */
@@ -20,6 +23,7 @@ function fakeFetch(routes: Record<string, Route>): typeof fetch {
   }) as typeof fetch;
 }
 
+// A raw pull-request object in GitHub's REST shape (snake_case), with optional overrides.
 const pr = (over: Record<string, unknown> = {}) => ({
   number: 7,
   title: "Fix login",
@@ -35,6 +39,7 @@ const pr = (over: Record<string, unknown> = {}) => ({
   ...over,
 });
 
+// Client wired to the fake fetch; sleep is a no-op so retry back-offs don't slow tests down.
 const client = (routes: Record<string, Route>) =>
   new GitHubClient({ token: "t", repo: "acme/app", fetchImpl: fakeFetch(routes), sleep: async () => undefined });
 

@@ -42,10 +42,11 @@ export interface AskResult {
   refusedBecause?: "monthly_budget" | "daily_limit" | "too_long" | "model_unavailable";
 }
 
-const MAX_INPUT_CHARS = 2000;
-const HISTORY_MESSAGES = 6;
-const MAX_CONVERSATIONS = 200;
+const MAX_INPUT_CHARS = 2000; // longer questions are refused before any model call (cost control)
+const HISTORY_MESSAGES = 6; // remembered Q&A messages per conversation
+const MAX_CONVERSATIONS = 200; // oldest conversations are forgotten beyond this, bounding memory
 
+// Per-request limits: "rounds" is the max model calls (tool loop); economy mode makes both smaller.
 const LIMITS = {
   normal: { rounds: 4, maxTokens: 800 },
   economy: { rounds: 2, maxTokens: 350 },
@@ -59,6 +60,7 @@ export class Agent {
     this.now = o.now ?? (() => new Date());
   }
 
+  // Flow: validate input -> budget gate -> tool-calling loop -> grounding check -> remember and return.
   async ask(input: AskInput): Promise<AskResult> {
     const text = input.text.trim();
     if (text.length > MAX_INPUT_CHARS) {
@@ -89,6 +91,7 @@ export class Agent {
     const requestId = randomUUID();
     const proposed: ActionRecord[] = [];
     const replaced: ActionRecord[] = [];
+    // PR numbers seen in tool output (the allowed ones) and numbers GitHub said don't exist.
     const fetched = new Set<number>();
     const missing = new Set<number>();
     const ctx: ToolContext = {
@@ -137,6 +140,7 @@ export class Agent {
           break;
         }
 
+        // The model asked for tools: run them and feed the results back for the next round.
         messages.push({ role: "assistant", content: res.content, toolCalls: res.toolCalls });
         for (const call of res.toolCalls) {
           const output = await this.runCall(call, ctx);
@@ -169,6 +173,7 @@ export class Agent {
     return { text: finalText, proposed, replaced };
   }
 
+  // Parses the model's raw JSON arguments; bad JSON becomes an error result the model can read, not a crash.
   private runCall(call: ToolCall, ctx: ToolContext): Promise<string> {
     let args: unknown;
     try {
@@ -191,6 +196,7 @@ export class Agent {
     }
   }
 
+  // Tells the team once per level change (economy / blocked); claimAlert makes sure each level alerts only once.
   private async maybeAlert(): Promise<void> {
     const s = this.o.budget.summary();
     if (s.level !== "normal" && this.o.budget.claimAlert(s.level)) {

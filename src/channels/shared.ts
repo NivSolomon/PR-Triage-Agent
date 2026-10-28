@@ -16,8 +16,9 @@ const STATE_LABEL: Record<TriageState, string> = {
   unclear: "check CI first",
 };
 
-const MAX_FACTS = 3;
+const MAX_FACTS = 3; // facts shown per PR, to keep chat messages short
 
+// One ranked PR as lines: headline, top facts, unknowns ("?"), the next step and the source link.
 function renderItem(a: TriageAssessment, rank: number, next: string): string[] {
   const out = [`${rank}. #${a.number} ${a.title} - ${STATE_LABEL[a.state]} (score ${a.score}, confidence ${a.confidence})`];
   for (const s of a.signals.slice(0, MAX_FACTS)) out.push(`   - ${s.text}`);
@@ -59,9 +60,12 @@ export function renderQueue(q: QueueResult, viewer?: { login: string }): string 
   if (q.items.length > 0) lines.push(`Score: higher means review sooner. Confidence: how complete the GitHub data was, not a prediction.`);
   return lines.join("\n").trim();
 }
+
+/** Plain-text budget status for /triage budget and similar. */
 export function renderBudget(s: BudgetSummary): string {
   const money = (n: number) => `$${n.toFixed(2)}`;
   const pct = Math.round(s.ratio * 100);
+  // Show "<1%" instead of a misleading "0%" when something has been spent.
   const pctLabel = pct < 1 && s.spentUsd > 0 ? "<1%" : `${pct}%`;
   return [
     `AI budget for ${s.month}`,
@@ -92,6 +96,7 @@ export async function decide(
   try {
     const record =
       kind === "approve"
+        // Pass editedBody only when the approver changed the text; the service records the original separately.
         ? await (editedBody === undefined ? approvals.approve(id, actorId) : approvals.approve(id, actorId, { editedBody }))
         : await approvals.reject(id, actorId);
     return { ok: record.status === "executed" || record.status === "rejected", text: renderOutcome(record), record };
@@ -108,6 +113,7 @@ export function splitMessage(text: string, max = 3800): string[] {
   const parts: string[] = [];
   let current = "";
   for (const line of text.split("\n")) {
+    // A single line longer than the limit is cut, so every part still fits.
     const piece = line.length > max ? line.slice(0, max) : line;
     if (current.length + piece.length + 1 > max) {
       parts.push(current);

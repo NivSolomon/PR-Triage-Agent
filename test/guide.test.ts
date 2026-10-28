@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { buildGuide, renderGuideText } from "../src/guide.js";
 
+// Tests for the user guide: each role is told only what it can actually do.
+
+// Helpers: all guide text, or just the items of sections with a given tone ("can", "cannot", ...).
 const all = (g: ReturnType<typeof buildGuide>) => g.sections.flatMap((s) => s.items).join("\n");
 const section = (g: ReturnType<typeof buildGuide>, tone: string) => g.sections.filter((s) => s.tone === tone).flatMap((s) => s.items).join("\n");
 

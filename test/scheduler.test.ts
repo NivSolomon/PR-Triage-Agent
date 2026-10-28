@@ -6,6 +6,9 @@ import { RunRepository } from "../src/store/runs.js";
 import type { TriageAssessment } from "../src/triage/analyze.js";
 import type { QueueResult } from "../src/triage/queue.js";
 
+// Tests for the daily digest: rendering, running, cron wording, the run log and the schedule timer.
+
+// A minimal assessed PR in the given state; tests override single fields.
 const item = (number: number, state: TriageAssessment["state"], extra: Partial<TriageAssessment> = {}): TriageAssessment => ({
   number,
   title: `PR ${number}`,
@@ -21,6 +24,7 @@ const item = (number: number, state: TriageAssessment["state"], extra: Partial<T
   ...extra,
 });
 
+// A queue result wrapping the given items (no failures, not truncated unless overridden).
 const queue = (items: TriageAssessment[], over: Partial<QueueResult> = {}): QueueResult => ({
   generatedAt: "2026-10-20T05:30:00Z",
   repo: "acme/app",

@@ -1,6 +1,9 @@
 ﻿import { describe, expect, it } from "vitest";
 import { homeBlocks, homeDeniedBlocks } from "../src/channels/slackHome.js";
 
+// Tests for the Slack Home tab layout.
+
+// All visible text in the blocks (section text and context elements), for easy assertions.
 const texts = (blocks: Array<Record<string, unknown>>): string[] =>
   blocks.flatMap((b) => {
     const t = (b.text as { text?: string } | undefined)?.text;

@@ -5,10 +5,15 @@ import { buildQueue } from "../src/triage/queue.js";
 import type { GitHubReader } from "../src/github/port.js";
 import type { PrDetail } from "../src/github/types.js";
 
+// Tests for triage scoring: PR state, CI, size, waiting time, ranking and the queue.
+// Everything is measured against a fixed NOW so results never depend on the real clock.
 const NOW = new Date("2026-10-20T12:00:00Z");
+// Shorthand for a review entry on a PR (commitId is the commit the review was made on).
 const approval = (reviewer: string, state: string, commitId: string | null) => ({ reviewer, state, submittedAt: null, commitId });
+// ISO timestamp h hours before NOW.
 const hoursAgo = (h: number) => new Date(NOW.getTime() - h * 3_600_000).toISOString();
 
+// A healthy, small, green PR; tests override only what they care about.
 function pr(overrides: Partial<PrDetail> = {}): PrDetail {
   return {
     number: 1,

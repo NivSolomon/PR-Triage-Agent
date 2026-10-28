@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { createApp, makeIsApprover } from "../src/app.js";
 import { loadConfig } from "../src/config.js";
 
+// Tests for app wiring: who counts as an approver, and startup failing fast on missing config.
 describe("makeIsApprover", () => {
   it("accepts only listed Slack approvers; chat access alone is not enough", () => {
     const isApprover = makeIsApprover(

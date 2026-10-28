@@ -7,6 +7,9 @@ import {
 } from "../src/channels/shared.js";
 import type { QueueResult } from "../src/triage/queue.js";
 
+// Tests for helpers shared by all chat channels: queue rendering, decision outcomes and message splitting.
+
+// A queue with one PR that has 5 facts and 1 unknown, so capping can be tested.
 const queue = (over: Partial<QueueResult> = {}): QueueResult => ({
   generatedAt: "2026-10-20T12:00:00Z",
   repo: "acme/app",
@@ -55,6 +58,7 @@ describe("renderQueue", () => {
 });
 
 describe("decide", () => {
+  // Minimal action record with the given status.
   const record = (status: string) => ({ status, prNumber: 7, prUrl: "https://x/7", resultUrl: "https://x/7#c", error: null });
 
   it("turns an approval into a plain outcome message", async () => {

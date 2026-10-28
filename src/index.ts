@@ -7,6 +7,7 @@ async function main(): Promise<void> {
   await app.start();
   console.log(`PR triage agent running for ${config.GITHUB_REPO}`);
 
+  // Graceful shutdown on Ctrl+C / platform stop; the flag makes a second signal a no-op.
   let stopping = false;
   const shutdown = async (signal: string): Promise<void> => {
     if (stopping) return;

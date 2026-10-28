@@ -9,8 +9,13 @@ import { BudgetService } from "../src/budget/service.js";
 import { openDatabase } from "../src/store/db.js";
 import type { PrDetail } from "../src/github/types.js";
 
+// Tests for the Agent loop (tool calls, budget, outages) and for tool permissions.
+// The LLM, GitHub and approvals are all faked, so no network is used.
+
+// Fixed clock so budget and "waiting time" results are deterministic.
 const NOW = new Date("2026-10-20T12:00:00Z");
 
+// A full PR as GitHub would return it. The body is a prompt-injection attempt on purpose.
 const detail = (n: number): PrDetail => ({
   number: n,
   title: `PR ${n}`,
@@ -37,8 +42,10 @@ const detail = (n: number): PrDetail => ({
   commentCount: 0,
 });
 
+// A script decides each model reply from the request and the call number (1-based).
 type Script = (req: LlmRequest, call: number) => Partial<LlmResponse>;
 
+// Fake model that follows the script and records every request it received.
 function fakeLlm(script: Script) {
   let call = 0;
   const requests: LlmRequest[] = [];
@@ -58,6 +65,7 @@ function fakeLlm(script: Script) {
   return { llm, requests };
 }
 
+// Builds an Agent wired to the fake model, an in-memory DB, a real BudgetService and stubbed GitHub/approvals.
 function setup(script: Script, budgetOver: Partial<ConstructorParameters<typeof BudgetService>[0]> = {}) {
   const db = openDatabase(":memory:");
   const budget = new BudgetService({
@@ -94,6 +102,7 @@ function setup(script: Script, budgetOver: Partial<ConstructorParameters<typeof 
   return { agent, github, approvals, requests, budget, notifyTeam, llm };
 }
 
+// Default request for agent.ask(): a Slack user who is allowed to propose comments.
 const ask = (text: string, over: Partial<Parameters<Agent["ask"]>[0]> = {}) => ({
   conversationId: "c1",
   text,

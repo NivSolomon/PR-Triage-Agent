@@ -2,6 +2,10 @@ import { describe, expect, it } from "vitest";
 import { BudgetService, renderBudgetAlert } from "../src/budget/service.js";
 import { openDatabase } from "../src/store/db.js";
 
+// Tests for BudgetService: token pricing, spend levels, per-person daily caps and alerts.
+
+// Small round numbers (allowance = $5) keep the maths easy to follow.
+// Returns spend(usd) to record a cost and setNow(date) to move the clock.
 function setup(over: Partial<ConstructorParameters<typeof BudgetService>[0]> = {}) {
   let now = new Date("2026-10-20T10:00:00Z");
   const db = openDatabase(":memory:");

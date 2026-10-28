@@ -19,14 +19,20 @@ import {
   type E2eApp,
 } from "./e2e/harness.js";
 
+// End-to-end tests: the real app is assembled (see e2e/harness.ts) with only Slack, GitHub and the model faked,
+// and each test follows one user journey from request to the final GitHub write.
+
+// The message a user sends to ask the agent to propose a comment.
 const ASK_COMMENT = "Leave a comment on #102 asking sam to fix the failing unit-tests.";
 
+// Stopped after each test so the next one starts clean.
 let app: E2eApp | undefined;
 afterEach(async () => {
   await app?.stop();
   app = undefined;
 });
 
+// Bodies of every comment actually posted to (fake) GitHub.
 const postedBodies = (h: E2eApp) => h.github.calls.postComment.map((p) => p.body);
 
 describe("end to end: Slack ask → approve → GitHub post", () => {

@@ -18,6 +18,10 @@ import {
 import type { SlackApi } from "../src/channels/slack.js";
 import type { ActionRecord } from "../src/store/actions.js";
 
+// Tests for the Slack channel: commands, DMs/mentions, approval cards, buttons and the Home tab.
+// The Slack API is replaced by a recording fake, so nothing is sent for real.
+
+// A pending approval record for PR #7; tests override single fields.
 const record = (over: Partial<ActionRecord> = {}): ActionRecord => ({
   id: "11111111-2222-3333-4444-555555555555",
   kind: "comment",
@@ -39,12 +43,15 @@ const record = (over: Partial<ActionRecord> = {}): ActionRecord => ({
   ...over,
 });
 
+// A message the fake Slack API received.
 interface Post {
   channel: string;
   text: string;
   opts?: { threadTs?: string; blocks?: unknown[] };
 }
 
+// Builds a SlackChannel with fakes for Slack, agent, approvals, GitHub and budget.
+// Returns the recorded posts/removals/home views so tests can assert on what was sent.
 function setup(
   over: { githubUsers?: Record<string, string>; allowed?: string[]; approvers?: string[]; allowAll?: boolean; teamId?: string; teamChannelId?: string; ask?: () => Promise<unknown>; approvals?: object } = {},
 ) {
@@ -112,6 +119,7 @@ describe("slackSafe", () => {
   });
 });
 
+// Helpers: pull the text of every "section" block, and undo Slack escaping for readable assertions.
 const textOf = (blocks: unknown[]): string[] =>
   (blocks as Array<{ type: string; text?: { text: string } }>).filter((b) => b.type === "section").map((b) => b.text?.text ?? "");
 const unescape = (s: string): string => s.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");

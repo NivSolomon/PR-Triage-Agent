@@ -11,16 +11,21 @@ import type { DigestInfo } from "../src/web/server.js";
 import { SessionStore } from "../src/web/sessions.js";
 import { APP_JS, INDEX_HTML } from "../src/web/ui.js";
 
+// Tests for the web UI server (routes, auth, sessions, approvals), run against a real HTTP server on a random port.
+
+// Shared keys: a reader can only look; an approver can also decide.
 const READER = "reader-key-0123456789";
 const APPROVER = "approver-key-0123456789";
 const APPROVER_ACTOR = "web:approver";
 
+// Closed after every test so servers never leak between tests.
 let server: Server | undefined;
 afterEach(async () => {
   await new Promise<void>((r) => (server ? server.close(() => r()) : r()));
   server = undefined;
 });
 
+// Per-person keys: each key maps to a named user with a role.
 const DANA = "dana-personal-key-0123456";
 const LEE = "lee-personal-key-012345678";
 const USERS = [
@@ -28,6 +33,8 @@ const USERS = [
   { name: "lee", key: LEE, role: "reader" as const },
 ];
 
+// Starts the web app with faked GitHub/agent and real approvals/budget.
+// Returns call(path, opts): a fetch helper that adds JSON headers and the Bearer key.
 async function start(
   over: { accessKey?: string; approverKey?: string; users?: Array<{ name: string; key: string; role: "reader" | "approver"; github?: string }>; trustProxy?: number; sessions?: SessionStore; maxFailures?: number; digest?: DigestInfo } = {
     accessKey: READER,

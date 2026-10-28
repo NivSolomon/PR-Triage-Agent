@@ -6,17 +6,23 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createMcpRouter } from "../src/mcp/server.js";
 
+// Tests for the MCP endpoint: token authentication and what each token's role may do.
+// Uses a real MCP client over HTTP against a local server.
+
+// Bearer tokens: "reader" can only read; "proposer" can also propose comments.
 const READER = "reader-token-0123456789";
 const PROPOSER = "proposer-token-0123456789";
 
 let server: Server | undefined;
 const clients: Client[] = [];
+// Close clients first, then the server, so no connection is left open.
 afterEach(async () => {
   await Promise.all(clients.splice(0).map((c) => c.close().catch(() => undefined)));
   await new Promise<void>((r) => (server ? server.close(() => r()) : r()));
   server = undefined;
 });
 
+// Mounts the MCP router on a throwaway Express app; connect(token) returns an authenticated MCP client.
 async function start() {
   const github = {
     repo: "acme/app",
@@ -55,6 +61,7 @@ async function start() {
   return { url, connect, github, approvals, agent, onProposed };
 }
 
+// Text of the first content item in an MCP tool result.
 const textOf = (r: unknown) => ((r as { content: { text: string }[] }).content[0] as { text: string }).text;
 
 describe("MCP authentication", () => {

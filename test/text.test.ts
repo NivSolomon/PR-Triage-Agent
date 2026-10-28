@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { count } from "../src/text/en.js";
 
+// count() builds "1 file" / "2 files" so messages never say "1 file(s)".
 describe("count", () => {
   it("says 1 of a noun without a trailing (s)", () => {
     expect(count(1, "file")).toBe("1 file");

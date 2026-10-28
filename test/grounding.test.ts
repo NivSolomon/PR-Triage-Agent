@@ -6,6 +6,8 @@ import { BudgetService } from "../src/budget/service.js";
 import { GitHubError } from "../src/github/client.js";
 import { openDatabase } from "../src/store/db.js";
 
+// Grounding = every PR number in an answer must come from fetched data or the user's own question.
+// First the pure helpers, then the Agent using them to warn about invented numbers.
 describe("grounding helpers", () => {
   it("extracts PR numbers from text and from tool JSON", () => {
     expect(mentionedNumbers("see #12, #12 and #7; not 99 or a#b")).toEqual([12, 7]);
@@ -57,6 +59,7 @@ describe("grounding helpers", () => {
 describe("Agent applies the grounding check", () => {
   it("warns the user and logs when the model invents a PR number", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    // Fake model: first asks for the queue (only #101 exists), then answers with an invented #404.
     let call = 0;
     const llm: LlmPort = {
       model: "fake",

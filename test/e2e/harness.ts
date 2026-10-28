@@ -49,6 +49,7 @@ export interface SlackUpdate {
   blocks: unknown[];
 }
 
+// Name of the tool the model called most recently (used to tell which step of the scripted flow we are on).
 function lastAssistantTool(req: LlmRequest): string | undefined {
   for (let i = req.messages.length - 1; i >= 0; i -= 1) {
     const m = req.messages[i];
@@ -66,14 +67,17 @@ export function commentLlm(pr = 102, bodies: string | string[] = COMMENT): LlmPo
     async complete(req: LlmRequest): Promise<LlmResponse> {
       const names = req.tools.map((t) => t.name);
       const last = req.messages.at(-1);
+      // Step 2: the PR was fetched, so propose the comment (the next draft if several were given).
       if (last?.role === "tool" && lastAssistantTool(req) === "get_pull_request" && names.includes("propose_comment")) {
         const body = drafts[Math.min(proposed, drafts.length - 1)] ?? COMMENT;
         proposed += 1;
         return call("propose_comment", { prNumber: pr, body, reason: "CI is failing on this PR." });
       }
+      // Step 1: a new user question, so fetch the PR first.
       if (last?.role === "user" && names.includes("get_pull_request")) {
         return call("get_pull_request", { number: pr });
       }
+      // Step 3: anything else is the final answer.
       return {
         content: `I drafted a comment on #${pr}. Nothing is posted until an approver approves it.`,
         toolCalls: [],
@@ -102,6 +106,7 @@ export function queueLlm(): LlmPort {
   };
 }
 
+// A model reply that asks for one tool call with the given arguments.
 function call(name: string, args: unknown): LlmResponse {
   return {
     content: null,

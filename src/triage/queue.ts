@@ -16,6 +16,8 @@ export interface QueueResult {
 
 const CONCURRENCY = 4;
 
+// Like Promise.all(items.map(fn)) but runs at most `limit` calls at once (to respect GitHub rate limits).
+// Each worker takes the next unclaimed index; results keep the input order.
 async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
   const out: R[] = new Array(items.length);
   let next = 0;
@@ -60,6 +62,7 @@ export async function buildQueue(
     }
   });
 
+  // One broken PR never fails the whole queue: successes are ranked, failures are reported separately.
   const items = rankAssessments(settled.flatMap((s) => (s.ok && s.assessment ? [s.assessment] : [])));
   const failed = settled.flatMap((s) => (s.ok ? [] : [s.failure]));
   return { generatedAt: now.toISOString(), repo: github.repo, items, failed, truncated };

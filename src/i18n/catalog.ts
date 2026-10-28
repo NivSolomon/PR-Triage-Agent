@@ -6,6 +6,7 @@ export function interpolate(template: string, vars?: Record<string, string | num
   );
 }
 
+// All user-facing text, keyed by id ("area.name"). Use {name} placeholders for values filled in by interpolate().
 export const EN = {
   brand: "PR Triage Agent",
   tagline: "Know which pull request to review next, and why.",

@@ -7,6 +7,9 @@ import { authorNext, personalView } from "../src/triage/personal.js";
 import type { QueueResult } from "../src/triage/queue.js";
 import type { PrDetail } from "../src/github/types.js";
 
+// Tests for the "my PRs" view: what a person must review, what they must fix, and how the queue is filtered for them.
+
+// A minimal assessed PR with the given author, state and requested reviewers.
 const item = (number: number, author: string, state: TriageState, requestedReviewers: string[] = []): TriageAssessment => ({
   number,
   title: `PR ${number}`,
@@ -21,6 +24,7 @@ const item = (number: number, author: string, state: TriageState, requestedRevie
   recommendation: `Review #${number}.`,
 });
 
+// A queue result wrapping the given items.
 const queue = (items: TriageAssessment[]): QueueResult => ({
   generatedAt: "2026-10-20T12:00:00Z",
   repo: "acme/app",

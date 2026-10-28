@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { loadConfig, requireConfig } from "../src/config.js";
 
+// Tests for reading environment variables: defaults, trimming, blank values and required secrets.
 describe("loadConfig", () => {
   it("applies defaults when env is empty", () => {
     const c = loadConfig({});
